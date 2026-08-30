@@ -105,40 +105,21 @@ if 'quirofanos_df' not in st.session_state:
 # ==========================================
 # 4. INTERFAZ: PANEL IZQUIERDO (SIDEBAR)
 # ==========================================
-with st.sidebar:
-    st.header("📅 Calendario y Carga")
-    
-    col1, col2 = st.columns(2)
-    selected_year = col1.number_input("Año", min_value=2020, max_value=2050, value=st.session_state.current_year)
-    selected_month = col2.number_input("Mes", min_value=1, max_value=12, value=st.session_state.current_month)
-    
-    if st.button("Generar Plantilla Mensual"):
-        st.session_state.matrix_df = generate_base_matrix(selected_year, selected_month)
-        st.session_state.current_year = selected_year
-        st.session_state.current_month = selected_month
-        st.success("Plantilla generada.")
-    
-    st.divider()
-    
-    st.subheader("Cargar Datos")
+st.subheader("Cargar Datos")
     uploaded_file = st.file_uploader("Sube tu matriz (Excel/CSV)", type=["xlsx", "csv"])
     if uploaded_file is not None:
-        try:
-            if uploaded_file.name.endswith('.csv'):
-                st.session_state.matrix_df = pd.read_csv(uploaded_file, index_col=0)
-            else:
-                st.session_state.matrix_df = pd.read_excel(uploaded_file, index_col=0)
-            st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
-            st.success("Archivo cargado.")
-        except Exception as e:
-            st.error(f"Error al cargar: {e}")
-            
-    st.divider()
-    
-    st.subheader("Guardar Datos")
-    csv = st.session_state.matrix_df.to_csv().encode('utf-8')
-    st.download_button("Descargar Matriz (CSV)", data=csv, file_name=f"matriz_{selected_year}_{selected_month}.csv", mime='text/csv')
-
+        # AÑADIMOS ESTE BOTÓN DE FRENO:
+        if st.button("📥 Confirmar Carga de Archivo", type="primary"):
+            try:
+                if uploaded_file.name.endswith('.csv'):
+                    st.session_state.matrix_df = pd.read_csv(uploaded_file, index_col=0)
+                else:
+                    st.session_state.matrix_df = pd.read_excel(uploaded_file, index_col=0)
+                st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
+                st.session_state.update_counter += 1
+                st.success("Archivo cargado con éxito. Ya puedes modificarlo.")
+            except Exception as e:
+                st.error(f"Error al cargar: {e}")
 # ==========================================
 # 5. INTERFAZ: PANEL CENTRAL
 # ==========================================
