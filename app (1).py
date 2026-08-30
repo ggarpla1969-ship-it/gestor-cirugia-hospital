@@ -319,18 +319,44 @@ with tab1:
 with tab2:
     st.header("Matriz de Personal")
     
-    dropdown_config = {col: st.column_config.SelectboxColumn(options=ALL_STATUSES, required=False) for col in ALL_STAFF}
-    styled_df = st.session_state.matrix_df.style.apply(lambda x: style_matrix(st.session_state.matrix_df), axis=None)
+    # 1. Separamos los datos en dos tablas
+    df_adjuntos = st.session_state.matrix_df[SURGEONS]
+    df_residentes = st.session_state.matrix_df[RESIDENTS]
     
-    edited_df = st.data_editor(
-        styled_df, 
-        column_config=dropdown_config, 
+    # 2. Mostramos la tabla de ADJUNTOS
+    st.subheader("👨‍⚕️ Adjuntos")
+    dropdown_adj = {col: st.column_config.SelectboxColumn(options=ALL_STATUSES, required=False) for col in SURGEONS}
+    styled_adj = df_adjuntos.style.apply(lambda x: style_matrix(df_adjuntos), axis=None)
+    
+    edited_adj = st.data_editor(
+        styled_adj, 
+        column_config=dropdown_adj, 
         use_container_width=True, 
-        height=650,
-        key=f"matrix_editor_{st.session_state.update_counter}" 
+        height=1200,
+        key=f"editor_adj_{st.session_state.update_counter}" 
     )
     
-    processed_df = apply_guardia_rules(edited_df.copy())
+    st.divider()
+    
+    # 3. Mostramos la tabla de RESIDENTES
+    st.subheader("📚 Residentes")
+    dropdown_res = {col: st.column_config.SelectboxColumn(options=ALL_STATUSES, required=False) for col in RESIDENTS}
+    styled_res = df_residentes.style.apply(lambda x: style_matrix(df_residentes), axis=None)
+    
+    edited_res = st.data_editor(
+        styled_res, 
+        column_config=dropdown_res, 
+        use_container_width=True, 
+        height=1200,
+        key=f"editor_res_{st.session_state.update_counter}" 
+    )
+    
+    # 4. Juntamos las dos tablas por debajo para comprobar reglas y guardar
+    combined_df = pd.concat([edited_adj, edited_res], axis=1)
+    combined_df = combined_df[ALL_STAFF] # Aseguramos el orden original
+    
+    processed_df = apply_guardia_rules(combined_df.copy())
+    
     if not processed_df.equals(st.session_state.matrix_df):
         st.session_state.matrix_df = processed_df
         st.session_state.update_counter += 1
