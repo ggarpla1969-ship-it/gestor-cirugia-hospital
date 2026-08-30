@@ -46,7 +46,7 @@ def generate_base_matrix(year, month):
                 if doc in df.columns: df.at[row_idx, doc] = "C. HOS M."
             if "A7" in df.columns: df.at[row_idx, "A7"] = "C. HOS T."
         elif weekday == 1: 
-            for doc in ["B4", "B5","B6", "B7", "B9"]: 
+            for doc in ["B4", "B5", "B6", "B7", "B9"]: 
                 if doc in df.columns: df.at[row_idx, doc] = "C. HOS M."
         elif weekday == 2: 
             for doc in ["A1", "B5", "D2", "D3", "D4", "D6"]:
@@ -69,9 +69,7 @@ def generate_base_matrix(year, month):
 def apply_guardia_rules(df):
     for col in df.columns:
         for i in range(len(df) - 1):
-            # Limpiamos espacios en blanco y forzamos a que lo lea en mayúsculas
-            current_status = str(df.iloc[i][col]).strip().upper() 
-            
+            current_status = str(df.iloc[i][col]).strip().upper()
             if current_status == "G" or current_status.startswith("G +"):
                 df.iat[i+1, df.columns.get_loc(col)] = "SG"
     return df
@@ -102,13 +100,31 @@ if 'matrix_df' not in st.session_state:
 if 'quirofanos_df' not in st.session_state:
     st.session_state.quirofanos_df = pd.DataFrame(columns=["Fecha", "Unidad", "Grupo", "Quirófano", "Turno", "Equipo"])
 
+if 'update_counter' not in st.session_state:
+    st.session_state.update_counter = 0
+
 # ==========================================
 # 4. INTERFAZ: PANEL IZQUIERDO (SIDEBAR)
 # ==========================================
-st.subheader("Cargar Datos")
+with st.sidebar:
+    st.header("📅 Calendario y Carga")
+    
+    col1, col2 = st.columns(2)
+    selected_year = col1.number_input("Año", min_value=2020, max_value=2050, value=st.session_state.current_year)
+    selected_month = col2.number_input("Mes", min_value=1, max_value=12, value=st.session_state.current_month)
+    
+    if st.button("Generar Plantilla Mensual"):
+        st.session_state.matrix_df = generate_base_matrix(selected_year, selected_month)
+        st.session_state.current_year = selected_year
+        st.session_state.current_month = selected_month
+        st.session_state.update_counter += 1
+        st.success("Plantilla generada.")
+    
+    st.divider()
+    
+    st.subheader("Cargar Datos")
     uploaded_file = st.file_uploader("Sube tu matriz (Excel/CSV)", type=["xlsx", "csv"])
     if uploaded_file is not None:
-        # AÑADIMOS ESTE BOTÓN DE FRENO:
         if st.button("📥 Confirmar Carga de Archivo", type="primary"):
             try:
                 if uploaded_file.name.endswith('.csv'):
@@ -120,6 +136,13 @@ st.subheader("Cargar Datos")
                 st.success("Archivo cargado con éxito. Ya puedes modificarlo.")
             except Exception as e:
                 st.error(f"Error al cargar: {e}")
+            
+    st.divider()
+    
+    st.subheader("Guardar Datos")
+    csv = st.session_state.matrix_df.to_csv().encode('utf-8')
+    st.download_button("Descargar Matriz (CSV)", data=csv, file_name=f"matriz_{selected_year}_{selected_month}.csv", mime='text/csv')
+
 # ==========================================
 # 5. INTERFAZ: PANEL CENTRAL
 # ==========================================
@@ -184,6 +207,7 @@ with tab1:
                     st.session_state.matrix_df.at[q_date, p] = "Q"
                     
                 st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
+                st.session_state.update_counter += 1
                 st.success(f"✅ Equipo ({equipo_str}) asignado correctamente.")
                 st.rerun()
 
@@ -258,6 +282,7 @@ with tab1:
                         
                         st.session_state.quirofanos_df.at[idx_mod, "Equipo"] = ", ".join(nuevo_equipo)
                         st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
+                        st.session_state.update_counter += 1
                         st.success("✅ Equipo actualizado correctamente.")
                         st.rerun()
 
@@ -283,6 +308,7 @@ with tab1:
                         es_finde = "(Sábado)" in fecha_suspendida or "(Domingo)" in fecha_suspendida
                         st.session_state.matrix_df.at[fecha_suspendida, personal_suspendido] = "none" if es_finde else "Libre"
                 
+                st.session_state.update_counter += 1
                 st.success("✅ Quirófano suspendido. El equipo vuelve a estar disponible (si no tenían otros turnos).")
                 st.rerun()
 
@@ -301,15 +327,13 @@ with tab2:
         column_config=dropdown_config, 
         use_container_width=True, 
         height=650,
-        key="matrix_editor" # <-- SOLUCIÓN: Asignamos una etiqueta
+        key=f"matrix_editor_{st.session_state.update_counter}" 
     )
     
     processed_df = apply_guardia_rules(edited_df.copy())
     if not processed_df.equals(st.session_state.matrix_df):
         st.session_state.matrix_df = processed_df
-        # <-- SOLUCIÓN: Forzamos el borrado de la memoria visual
-        if "matrix_editor" in st.session_state:
-            del st.session_state["matrix_editor"]
+        st.session_state.update_counter += 1
         st.rerun()
 
 with tab3:
