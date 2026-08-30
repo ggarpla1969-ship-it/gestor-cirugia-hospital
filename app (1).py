@@ -69,7 +69,9 @@ def generate_base_matrix(year, month):
 def apply_guardia_rules(df):
     for col in df.columns:
         for i in range(len(df) - 1):
-            current_status = str(df.iloc[i][col])
+            # Limpiamos espacios en blanco y forzamos a que lo lea en mayúsculas
+            current_status = str(df.iloc[i][col]).strip().upper() 
+            
             if current_status == "G" or current_status.startswith("G +"):
                 df.iat[i+1, df.columns.get_loc(col)] = "SG"
     return df
