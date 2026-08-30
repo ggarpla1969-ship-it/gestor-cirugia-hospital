@@ -46,7 +46,7 @@ def generate_base_matrix(year, month):
                 if doc in df.columns: df.at[row_idx, doc] = "C. HOS M."
             if "A7" in df.columns: df.at[row_idx, "A7"] = "C. HOS T."
         elif weekday == 1: 
-            for doc in ["B4", "B5", "B7", "B9"]: 
+            for doc in ["B4", "B5","B6", "B7", "B9"]: 
                 if doc in df.columns: df.at[row_idx, doc] = "C. HOS M."
         elif weekday == 2: 
             for doc in ["A1", "B5", "D2", "D3", "D4", "D6"]:
