@@ -207,14 +207,10 @@ with tab1:
     st.subheader("Registro de Quirófanos")
     st.dataframe(st.session_state.quirofanos_df, use_container_width=True, hide_index=True)
     
-    # -------------------------------------------------------------
-    # NUEVO: SECCIÓN DE GESTIÓN (MODIFICAR Y SUSPENDER)
-    # -------------------------------------------------------------
     if not st.session_state.quirofanos_df.empty:
         st.divider()
         st.subheader("⚙️ Gestionar Quirófanos Programados")
         
-        # Preparamos las opciones para el desplegable
         opciones_gestion = []
         for idx, row in st.session_state.quirofanos_df.iterrows():
             opciones_gestion.append(f"{idx} | {row['Fecha']} - Unidad {row['Unidad']} - {row['Quirófano']} ({row['Turno']}) - Equipo: {row['Equipo']}")
@@ -240,20 +236,17 @@ with tab1:
                 if not nuevo_equipo:
                     st.warning("El equipo no puede estar vacío. Si quieres eliminar la sesión, usa la pestaña 'Suspender'.")
                 else:
-                    # Diferenciar quién entra y quién sale
                     viejos_set = set(equipo_actual)
                     nuevos_set = set(nuevo_equipo)
                     añadidos = nuevos_set - viejos_set
                     quitados = viejos_set - nuevos_set
                     
                     errores_mod = []
-                    # 1. Validar a los que entran nuevos
                     for p in añadidos:
                         estado_actual = str(st.session_state.matrix_df.at[row_mod["Fecha"], p])
                         if any(r in estado_actual for r in RESTRICTED_STATUSES):
                             errores_mod.append(f"🛑 **{p}**: Bloqueado por Matriz ('{estado_actual}')")
                         else:
-                            # Mirar si ya tiene OTRO quirófano ese mismo turno (sin contar el que estamos editando)
                             ya_asignado = False
                             for i, r in st.session_state.quirofanos_df.iterrows():
                                 if i != idx_mod and r["Fecha"] == row_mod["Fecha"] and r["Turno"] == row_mod["Turno"]:
@@ -267,7 +260,6 @@ with tab1:
                         st.error("No se ha podido actualizar por conflictos con los nuevos miembros:")
                         for e in errores_mod: st.write(e)
                     else:
-                        # 2. Liberar a los que hemos quitado (si no tienen otro Q hoy)
                         for p in quitados:
                             sigue_en_q = False
                             for i, r in st.session_state.quirofanos_df.iterrows():
@@ -278,11 +270,9 @@ with tab1:
                                 es_finde = "(Sábado)" in row_mod["Fecha"] or "(Domingo)" in row_mod["Fecha"]
                                 st.session_state.matrix_df.at[row_mod["Fecha"], p] = "none" if es_finde else "Libre"
                         
-                        # 3. Asignar 'Q' a los nuevos
                         for p in añadidos:
                             st.session_state.matrix_df.at[row_mod["Fecha"], p] = "Q"
                         
-                        # 4. Guardar cambios
                         st.session_state.quirofanos_df.at[idx_mod, "Equipo"] = ", ".join(nuevo_equipo)
                         st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
                         st.success("✅ Equipo actualizado correctamente.")
@@ -327,18 +317,21 @@ with tab2:
         styled_df, 
         column_config=dropdown_config, 
         use_container_width=True, 
-        height=650
+        height=650,
+        key="matrix_editor" # <-- SOLUCIÓN: Asignamos una etiqueta
     )
     
     processed_df = apply_guardia_rules(edited_df.copy())
     if not processed_df.equals(st.session_state.matrix_df):
         st.session_state.matrix_df = processed_df
+        # <-- SOLUCIÓN: Forzamos el borrado de la memoria visual
+        if "matrix_editor" in st.session_state:
+            del st.session_state["matrix_editor"]
         st.rerun()
 
 with tab3:
     st.header("📋 Resumen y Disponibilidad")
     
-    # --- SECCIÓN A: ACTIVIDAD DE QUIRÓFANO ---
     st.subheader("A) Actividad de Quirófanos")
     
     q_df = st.session_state.quirofanos_df
@@ -355,7 +348,6 @@ with tab3:
     
     st.divider()
     
-    # --- SECCIÓN B: ACTIVIDAD POR PROFESIONAL ---
     st.subheader("B) Actividad por Profesional")
     
     profesional = st.selectbox("Selecciona un Cirujano o Residente:", ALL_STAFF)
@@ -394,7 +386,6 @@ with tab3:
 
     st.divider()
     
-    # --- SECCIÓN C: DISPONIBILIDAD DIARIA (IMPREVISTOS) ---
     st.subheader("C) Personal Disponible (Imprevistos / Retén)")
     st.write("Selecciona una fecha para ver quién está en estado **Libre**.")
     
