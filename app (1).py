@@ -17,7 +17,6 @@ ALL_STAFF = SURGEONS + RESIDENTS
 STATUSES = ["Libre", "none", "Q", "G", "SG", "C. HOS M.", "C. HOS T.", "C.VEC.", 
             "C.TELD.", "C.PRUD. 1", "C.PRUD. 2", "VAC", "CUR-CONGR.", "BAJA"]
 
-# Diccionario exhaustivo de combinaciones permitidas (incluyendo G + Q)
 COMBO_Q = [f"{s} + Q" for s in ["C. HOS M.", "C. HOS T.", "C.VEC.", "C.TELD.", "C.PRUD. 1", "C.PRUD. 2"]]
 COMBO_G = [f"G + {s}" for s in ["C. HOS M.", "C.VEC.", "C.TELD.", "C.PRUD. 1", "C.PRUD. 2"]]
 COMBO_G_Q = [f"G + {s} + Q" for s in ["C. HOS M.", "C.VEC.", "C.TELD.", "C.PRUD. 1", "C.PRUD. 2"]]
@@ -131,10 +130,12 @@ with st.sidebar:
     
     st.divider()
     
-    st.subheader("Cargar Datos")
-    uploaded_file = st.file_uploader("Sube tu matriz (Excel/CSV)", type=["xlsx", "csv", "ods"])
+    st.subheader("📥 Cargar Datos (Recuperar)")
+    
+    # 1. CARGA DE LA MATRIZ
+    uploaded_file = st.file_uploader("1. Sube tu Matriz General", type=["xlsx", "csv", "ods"], key="up_matriz")
     if uploaded_file is not None:
-        if st.button("📥 Confirmar Carga de Archivo", type="primary"):
+        if st.button("📥 Cargar Matriz", type="primary"):
             try:
                 if uploaded_file.name.endswith('.csv'):
                     st.session_state.matrix_df = pd.read_csv(uploaded_file, index_col=0)
@@ -142,20 +143,51 @@ with st.sidebar:
                     st.session_state.matrix_df = pd.read_excel(uploaded_file, index_col=0)
                 st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
                 st.session_state.update_counter += 1
-                st.success("Archivo cargado con éxito. Ya puedes modificarlo.")
+                st.success("✅ Matriz cargada con éxito.")
+                st.rerun()
             except Exception as e:
-                st.error(f"Error al cargar: {e}")
+                st.error(f"Error al cargar matriz: {e}")
+                
+    # 2. CARGA DEL REGISTRO DE QUIRÓFANOS
+    uploaded_q = st.file_uploader("2. Sube tu Registro Quirófanos", type=["xlsx", "csv", "ods"], key="up_q")
+    if uploaded_q is not None:
+        if st.button("📥 Cargar Quirófanos", type="primary"):
+            try:
+                if uploaded_q.name.endswith('.csv'):
+                    st.session_state.quirofanos_df = pd.read_csv(uploaded_q)
+                else:
+                    st.session_state.quirofanos_df = pd.read_excel(uploaded_q)
+                
+                # Nos aseguramos de que HC se trate siempre como texto, no como número
+                if 'HC' not in st.session_state.quirofanos_df.columns:
+                    st.session_state.quirofanos_df['HC'] = ""
+                st.session_state.quirofanos_df['HC'] = st.session_state.quirofanos_df['HC'].astype(str).replace("nan", "")
+                
+                st.session_state.update_counter += 1
+                st.success("✅ Quirófanos cargados con éxito.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error al cargar quirófanos: {e}")
             
     st.divider()
     
-    st.subheader("Guardar Datos")
-    csv = st.session_state.matrix_df.to_csv().encode('utf-8')
-    st.download_button("Descargar Matriz (CSV)", data=csv, file_name=f"matriz_{selected_year}_{selected_month}.csv", mime='text/csv')
+    st.subheader("💾 Guardar Datos (Descargar)")
+    
+    # 1. DESCARGA DE LA MATRIZ
+    csv_matriz = st.session_state.matrix_df.to_csv().encode('utf-8')
+    st.download_button("1. Descargar Matriz General (CSV)", data=csv_matriz, file_name=f"matriz_{selected_year}_{selected_month}.csv", mime='text/csv')
+
+    # 2. DESCARGA DEL REGISTRO DE QUIRÓFANOS
+    if not st.session_state.quirofanos_df.empty:
+        csv_q = st.session_state.quirofanos_df.to_csv(index=False).encode('utf-8')
+        st.download_button("2. Descargar Reg. Quirófanos (CSV)", data=csv_q, file_name=f"quirofanos_{selected_year}_{selected_month}.csv", mime='text/csv')
+    else:
+        st.info("No hay quirófanos registrados aún para descargar.")
 
 # ==========================================
 # 5. INTERFAZ: PANEL CENTRAL
 # ==========================================
-st.title("Gestión del Servicio de Cirugía General (v2.3)")
+st.title("Gestión del Servicio de Cirugía General (v2.4)")
 
 tab1, tab2, tab3 = st.tabs(["🏥 A: Gestor de Quirófanos", "📊 B: Matriz General", "📋 Resumen y Disponibilidad"])
 
