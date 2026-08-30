@@ -16,10 +16,12 @@ ALL_STAFF = SURGEONS + RESIDENTS
 
 STATUSES = ["Libre", "none", "Q", "G", "SG", "C. HOS M.", "C. HOS T.", "C.VEC.", 
             "C.TELD.", "C.PRUD. 1", "C.PRUD. 2", "VAC", "CUR-CONGR.", "BAJA"]
-# Añadimos combinaciones de Consulta + Quirófano (Q)
+
+# Diccionario exhaustivo de combinaciones permitidas (incluyendo Q + Q)
 COMBO_Q = [f"{s} + Q" for s in ["C. HOS M.", "C. HOS T.", "C.VEC.", "C.TELD.", "C.PRUD. 1", "C.PRUD. 2"]]
-COMBO_STATUSES = [f"G + {s}" for s in ["C. HOS M.", "C.VEC.", "C.TELD.", "C.PRUD. 1", "C.PRUD. 2"]] + COMBO_Q
-ALL_STATUSES = STATUSES + COMBO_STATUSES
+COMBO_G = [f"G + {s}" for s in ["C. HOS M.", "C.VEC.", "C.TELD.", "C.PRUD. 1", "C.PRUD. 2"]]
+COMBO_G_Q = [f"G + {s} + Q" for s in ["C. HOS M.", "C.VEC.", "C.TELD.", "C.PRUD. 1", "C.PRUD. 2"]]
+ALL_STATUSES = STATUSES + COMBO_Q + COMBO_G + COMBO_G_Q + ["Q + Q"]
 
 RESTRICCIONES_ABSOLUTAS = ["SG", "VAC", "CUR-CONGR.", "BAJA"]
 RESTRICCIONES_MANANA = ["C. HOS M.", "C.VEC.", "C.TELD.", "C.PRUD. 1", "C.PRUD. 2"]
@@ -88,7 +90,7 @@ def style_matrix(df):
                 cell_style += "background-color: #f0f2f6; "
             if val.startswith("G"):
                 cell_style += "color: #d32f2f; font-weight: bold; "
-            elif " + Q" in val:
+            elif " + Q" in val or val == "Q + Q":
                 cell_style += "color: #1565c0; font-weight: bold; " # Azul para turnos dobles
             styles.at[row, col] = cell_style
     return styles
@@ -153,8 +155,7 @@ with st.sidebar:
 # ==========================================
 # 5. INTERFAZ: PANEL CENTRAL
 # ==========================================
-# NUEVO TITULO CON VERSIÓN PARA ASEGURAR QUE SE ACTUALIZA
-st.title("Gestión del Servicio de Cirugía General (v2.0)")
+st.title("Gestión del Servicio de Cirugía General (v2.2)")
 
 tab1, tab2, tab3 = st.tabs(["🏥 A: Gestor de Quirófanos", "📊 B: Matriz General", "📋 Resumen y Disponibilidad"])
 
@@ -184,15 +185,14 @@ with tab1:
             errores = []
             
             for personal in equipo_nombres:
-                estado_actual = str(st.session_state.matrix_df.at[q_date, personal])
+                estado_actual = str(st.session_state.matrix_df.at[q_date, personal]).strip()
                 
-                # Reglas estrictamente separadas por turno
                 restrict_matrix = False
-                if estado_actual in RESTRICCIONES_ABSOLUTAS:
+                if any(r in estado_actual for r in RESTRICCIONES_ABSOLUTAS):
                     restrict_matrix = True
-                elif q_turno == "Mañana" and estado_actual in RESTRICCIONES_MANANA:
+                elif q_turno == "Mañana" and any(r in estado_actual for r in RESTRICCIONES_MANANA):
                     restrict_matrix = True
-                elif q_turno == "Tarde" and estado_actual in RESTRICCIONES_TARDE:
+                elif q_turno == "Tarde" and any(r in estado_actual for r in RESTRICCIONES_TARDE):
                     restrict_matrix = True
                 
                 ya_asignado = False
@@ -220,13 +220,15 @@ with tab1:
                 
                 st.session_state.quirofanos_df = pd.concat([st.session_state.quirofanos_df, nueva_asignacion], ignore_index=True)
                 
-                # Novedad Visual: Combinar estado si es necesario
                 for p in equipo_nombres:
-                    estado_actual = str(st.session_state.matrix_df.at[q_date, p])
-                    if estado_actual in ["Libre", "none"]:
+                    estado_actual = str(st.session_state.matrix_df.at[q_date, p]).strip()
+                    if estado_actual in ["Libre", "none", ""]:
                         st.session_state.matrix_df.at[q_date, p] = "Q"
-                    elif estado_actual in RESTRICCIONES_MANANA or estado_actual in RESTRICCIONES_TARDE:
-                        st.session_state.matrix_df.at[q_date, p] = f"{estado_actual} + Q"
+                    elif estado_actual == "Q":
+                        st.session_state.matrix_df.at[q_date, p] = "Q + Q"
+                    elif "Q" not in estado_actual:
+                        if any(r in estado_actual for r in RESTRICCIONES_MANANA + RESTRICCIONES_TARDE):
+                            st.session_state.matrix_df.at[q_date, p] = f"{estado_actual} + Q"
                     
                 st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
                 st.session_state.update_counter += 1
@@ -274,14 +276,14 @@ with tab1:
                     
                     errores_mod = []
                     for p in añadidos:
-                        estado_actual = str(st.session_state.matrix_df.at[row_mod["Fecha"], p])
+                        estado_actual = str(st.session_state.matrix_df.at[row_mod["Fecha"], p]).strip()
                         
                         restrict_matrix = False
-                        if estado_actual in RESTRICCIONES_ABSOLUTAS:
+                        if any(r in estado_actual for r in RESTRICCIONES_ABSOLUTAS):
                             restrict_matrix = True
-                        elif row_mod["Turno"] == "Mañana" and estado_actual in RESTRICCIONES_MANANA:
+                        elif row_mod["Turno"] == "Mañana" and any(r in estado_actual for r in RESTRICCIONES_MANANA):
                             restrict_matrix = True
-                        elif row_mod["Turno"] == "Tarde" and estado_actual in RESTRICCIONES_TARDE:
+                        elif row_mod["Turno"] == "Tarde" and any(r in estado_actual for r in RESTRICCIONES_TARDE):
                             restrict_matrix = True
 
                         if restrict_matrix:
@@ -301,25 +303,28 @@ with tab1:
                         for e in errores_mod: st.write(e)
                     else:
                         for p in quitados:
-                            sigue_en_q = False
-                            for i, r in st.session_state.quirofanos_df.iterrows():
-                                if i != idx_mod and r["Fecha"] == row_mod["Fecha"] and p in r["Equipo"].split(", "):
-                                    sigue_en_q = True
-                                    break
-                            if not sigue_en_q:
-                                estado_actual = str(st.session_state.matrix_df.at[row_mod["Fecha"], p])
-                                if estado_actual == "Q":
+                            turnos_q = sum(1 for i, r in st.session_state.quirofanos_df.iterrows() if i != idx_mod and r["Fecha"] == row_mod["Fecha"] and p in r["Equipo"].split(", "))
+                            estado_actual = str(st.session_state.matrix_df.at[row_mod["Fecha"], p]).strip()
+                            
+                            if turnos_q == 0:
+                                if estado_actual in ["Q", "Q + Q"]:
                                     es_finde = "(Sábado)" in row_mod["Fecha"] or "(Domingo)" in row_mod["Fecha"]
                                     st.session_state.matrix_df.at[row_mod["Fecha"], p] = "none" if es_finde else "Libre"
                                 elif " + Q" in estado_actual:
-                                    st.session_state.matrix_df.at[row_mod["Fecha"], p] = estado_actual.replace(" + Q", "")
+                                    st.session_state.matrix_df.at[row_mod["Fecha"], p] = estado_actual.replace(" + Q", "").strip()
+                            elif turnos_q == 1:
+                                if estado_actual == "Q + Q":
+                                    st.session_state.matrix_df.at[row_mod["Fecha"], p] = "Q"
                         
                         for p in añadidos:
-                            estado_actual = str(st.session_state.matrix_df.at[row_mod["Fecha"], p])
-                            if estado_actual in ["Libre", "none"]:
+                            estado_actual = str(st.session_state.matrix_df.at[row_mod["Fecha"], p]).strip()
+                            if estado_actual in ["Libre", "none", ""]:
                                 st.session_state.matrix_df.at[row_mod["Fecha"], p] = "Q"
-                            elif estado_actual in RESTRICCIONES_MANANA or estado_actual in RESTRICCIONES_TARDE:
-                                st.session_state.matrix_df.at[row_mod["Fecha"], p] = f"{estado_actual} + Q"
+                            elif estado_actual == "Q":
+                                st.session_state.matrix_df.at[row_mod["Fecha"], p] = "Q + Q"
+                            elif "Q" not in estado_actual:
+                                if any(r in estado_actual for r in RESTRICCIONES_MANANA + RESTRICCIONES_TARDE):
+                                    st.session_state.matrix_df.at[row_mod["Fecha"], p] = f"{estado_actual} + Q"
                         
                         st.session_state.quirofanos_df.at[idx_mod, "HC"] = nuevo_hc
                         st.session_state.quirofanos_df.at[idx_mod, "Equipo"] = ", ".join(nuevo_equipo)
@@ -341,18 +346,18 @@ with tab1:
                 equipo_suspendido = row_deleted['Equipo'].split(", ")
                 
                 for personal_suspendido in equipo_suspendido:
-                    sigue_en_quirofano = False
-                    for _, r in st.session_state.quirofanos_df.iterrows():
-                        if r['Fecha'] == fecha_suspendida and personal_suspendido in r['Equipo'].split(", "):
-                            sigue_en_quirofano = True
-                            break
-                    if not sigue_en_quirofano:
-                        estado_actual = str(st.session_state.matrix_df.at[fecha_suspendida, personal_suspendido])
-                        if estado_actual == "Q":
+                    turnos_q = sum(1 for _, r in st.session_state.quirofanos_df.iterrows() if r["Fecha"] == fecha_suspendida and personal_suspendido in r["Equipo"].split(", "))
+                    estado_actual = str(st.session_state.matrix_df.at[fecha_suspendida, personal_suspendido]).strip()
+                    
+                    if turnos_q == 0:
+                        if estado_actual in ["Q", "Q + Q"]:
                             es_finde = "(Sábado)" in fecha_suspendida or "(Domingo)" in fecha_suspendida
                             st.session_state.matrix_df.at[fecha_suspendida, personal_suspendido] = "none" if es_finde else "Libre"
                         elif " + Q" in estado_actual:
-                            st.session_state.matrix_df.at[fecha_suspendida, personal_suspendido] = estado_actual.replace(" + Q", "")
+                            st.session_state.matrix_df.at[fecha_suspendida, personal_suspendido] = estado_actual.replace(" + Q", "").strip()
+                    elif turnos_q == 1:
+                        if estado_actual == "Q + Q":
+                            st.session_state.matrix_df.at[fecha_suspendida, personal_suspendido] = "Q"
                 
                 st.session_state.update_counter += 1
                 st.success("✅ Quirófano suspendido. El equipo vuelve a estar disponible.")
@@ -440,7 +445,8 @@ with tab3:
             if estado in ["", "none", "Libre"]: continue
             
             if estado.startswith("G"): conteo["Guardias (G)"] += count
-            if "Q" in estado: conteo["Quirófano (Q)"] += count
+            # Multiplicamos por la cantidad de "Q" que haya en el texto (Q normal = 1, Q + Q = 2)
+            if "Q" in estado: conteo["Quirófano (Q)"] += count * estado.count("Q")
             if "C. HOS M." in estado: conteo["C. HOS M."] += count
             if "C. HOS T." in estado: conteo["C. HOS T."] += count
             if "C.VEC." in estado: conteo["C.VEC."] += count
