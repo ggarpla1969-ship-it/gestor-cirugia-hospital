@@ -17,11 +17,11 @@ ALL_STAFF = SURGEONS + RESIDENTS
 STATUSES = ["Libre", "none", "Q", "G", "SG", "C. HOS M.", "C. HOS T.", "C.VEC.", 
             "C.TELD.", "C.PRUD. 1", "C.PRUD. 2", "VAC", "CUR-CONGR.", "BAJA"]
 
-# Diccionario exhaustivo de combinaciones permitidas (incluyendo Q + Q)
+# Diccionario exhaustivo de combinaciones permitidas (incluyendo G + Q)
 COMBO_Q = [f"{s} + Q" for s in ["C. HOS M.", "C. HOS T.", "C.VEC.", "C.TELD.", "C.PRUD. 1", "C.PRUD. 2"]]
 COMBO_G = [f"G + {s}" for s in ["C. HOS M.", "C.VEC.", "C.TELD.", "C.PRUD. 1", "C.PRUD. 2"]]
 COMBO_G_Q = [f"G + {s} + Q" for s in ["C. HOS M.", "C.VEC.", "C.TELD.", "C.PRUD. 1", "C.PRUD. 2"]]
-ALL_STATUSES = STATUSES + COMBO_Q + COMBO_G + COMBO_G_Q + ["Q + Q"]
+ALL_STATUSES = STATUSES + COMBO_Q + COMBO_G + COMBO_G_Q + ["Q + Q", "G + Q", "G + Q + Q"]
 
 RESTRICCIONES_ABSOLUTAS = ["SG", "VAC", "CUR-CONGR.", "BAJA"]
 RESTRICCIONES_MANANA = ["C. HOS M.", "C.VEC.", "C.TELD.", "C.PRUD. 1", "C.PRUD. 2"]
@@ -91,7 +91,7 @@ def style_matrix(df):
             if val.startswith("G"):
                 cell_style += "color: #d32f2f; font-weight: bold; "
             elif " + Q" in val or val == "Q + Q":
-                cell_style += "color: #1565c0; font-weight: bold; " # Azul para turnos dobles
+                cell_style += "color: #1565c0; font-weight: bold; " 
             styles.at[row, col] = cell_style
     return styles
 
@@ -155,7 +155,7 @@ with st.sidebar:
 # ==========================================
 # 5. INTERFAZ: PANEL CENTRAL
 # ==========================================
-st.title("Gestión del Servicio de Cirugía General (v2.2)")
+st.title("Gestión del Servicio de Cirugía General (v2.3)")
 
 tab1, tab2, tab3 = st.tabs(["🏥 A: Gestor de Quirófanos", "📊 B: Matriz General", "📋 Resumen y Disponibilidad"])
 
@@ -227,8 +227,8 @@ with tab1:
                     elif estado_actual == "Q":
                         st.session_state.matrix_df.at[q_date, p] = "Q + Q"
                     elif "Q" not in estado_actual:
-                        if any(r in estado_actual for r in RESTRICCIONES_MANANA + RESTRICCIONES_TARDE):
-                            st.session_state.matrix_df.at[q_date, p] = f"{estado_actual} + Q"
+                        # Añade el "+ Q" a CUALQUIER estado no bloqueado que no tuviera Q (incluye a las "G")
+                        st.session_state.matrix_df.at[q_date, p] = f"{estado_actual} + Q"
                     
                 st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
                 st.session_state.update_counter += 1
@@ -323,8 +323,7 @@ with tab1:
                             elif estado_actual == "Q":
                                 st.session_state.matrix_df.at[row_mod["Fecha"], p] = "Q + Q"
                             elif "Q" not in estado_actual:
-                                if any(r in estado_actual for r in RESTRICCIONES_MANANA + RESTRICCIONES_TARDE):
-                                    st.session_state.matrix_df.at[row_mod["Fecha"], p] = f"{estado_actual} + Q"
+                                st.session_state.matrix_df.at[row_mod["Fecha"], p] = f"{estado_actual} + Q"
                         
                         st.session_state.quirofanos_df.at[idx_mod, "HC"] = nuevo_hc
                         st.session_state.quirofanos_df.at[idx_mod, "Equipo"] = ", ".join(nuevo_equipo)
@@ -445,7 +444,6 @@ with tab3:
             if estado in ["", "none", "Libre"]: continue
             
             if estado.startswith("G"): conteo["Guardias (G)"] += count
-            # Multiplicamos por la cantidad de "Q" que haya en el texto (Q normal = 1, Q + Q = 2)
             if "Q" in estado: conteo["Quirófano (Q)"] += count * estado.count("Q")
             if "C. HOS M." in estado: conteo["C. HOS M."] += count
             if "C. HOS T." in estado: conteo["C. HOS T."] += count
