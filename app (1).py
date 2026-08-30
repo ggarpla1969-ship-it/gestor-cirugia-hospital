@@ -98,7 +98,9 @@ if 'matrix_df' not in st.session_state:
     st.session_state.matrix_df = generate_base_matrix(now.year, now.month)
 
 if 'quirofanos_df' not in st.session_state:
-    st.session_state.quirofanos_df = pd.DataFrame(columns=["Fecha", "Unidad", "Grupo", "Quirófano", "Turno", "Equipo"])
+    st.session_state.quirofanos_df = pd.DataFrame(columns=["Fecha", "Unidad", "Grupo", "Quirófano", "Turno", "HC", "Equipo"])
+elif 'HC' not in st.session_state.quirofanos_df.columns:
+    st.session_state.quirofanos_df['HC'] = "" # Parche por si la memoria antigua no tenía esta columna
 
 if 'update_counter' not in st.session_state:
     st.session_state.update_counter = 0
@@ -153,12 +155,14 @@ tab1, tab2, tab3 = st.tabs(["🏥 A: Gestor de Quirófanos", "📊 B: Matriz Gen
 with tab1:
     st.header("Asignación de Quirófanos")
     
-    c1, c_uni, c2, c3, c4 = st.columns(5)
+    # AÑADIDA LA COLUMNA DE HC
+    c1, c_uni, c2, c3, c4, c5 = st.columns(6)
     q_date = c1.selectbox("Fecha", st.session_state.matrix_df.index)
     q_unidad = c_uni.selectbox("Unidad", ["A", "B", "C", "D"])
     q_grupo = c2.selectbox("Grupo", ["Insular", "Materno"])
     q_sala = c3.selectbox("Quirófano", [f"Q{i}" for i in range(1, 9)])
     q_turno = c4.selectbox("Turno", ["Mañana", "Tarde"])
+    q_hc = c5.text_input("Nº HC (Hist. Clínica)")
     
     st.divider()
     
@@ -198,7 +202,7 @@ with tab1:
                 
                 nueva_asignacion = pd.DataFrame([{
                     "Fecha": q_date, "Unidad": q_unidad, "Grupo": q_grupo, 
-                    "Quirófano": q_sala, "Turno": q_turno, "Equipo": equipo_str
+                    "Quirófano": q_sala, "Turno": q_turno, "HC": q_hc, "Equipo": equipo_str
                 }])
                 
                 st.session_state.quirofanos_df = pd.concat([st.session_state.quirofanos_df, nueva_asignacion], ignore_index=True)
@@ -208,7 +212,7 @@ with tab1:
                     
                 st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
                 st.session_state.update_counter += 1
-                st.success(f"✅ Equipo ({equipo_str}) asignado correctamente.")
+                st.success(f"✅ Equipo ({equipo_str}) asignado correctamente para HC {q_hc}.")
                 st.rerun()
 
     st.subheader("Registro de Quirófanos")
@@ -220,9 +224,10 @@ with tab1:
         
         opciones_gestion = []
         for idx, row in st.session_state.quirofanos_df.iterrows():
-            opciones_gestion.append(f"{idx} | {row['Fecha']} - Unidad {row['Unidad']} - {row['Quirófano']} ({row['Turno']}) - Equipo: {row['Equipo']}")
+            hc_texto = f" (HC: {row.get('HC', '')})" if str(row.get('HC', '')) != "" else ""
+            opciones_gestion.append(f"{idx} | {row['Fecha']} - Unidad {row['Unidad']} - {row['Quirófano']} ({row['Turno']}){hc_texto} - Equipo: {row['Equipo']}")
             
-        tab_mod, tab_sus = st.tabs(["✏️ Modificar Equipo", "❌ Suspender Quirófano"])
+        tab_mod, tab_sus = st.tabs(["✏️ Modificar Equipo o HC", "❌ Suspender Quirófano"])
         
         with tab_mod:
             seleccion_mod = st.selectbox("Selecciona la asignación que quieres modificar:", opciones_gestion, key="sel_mod")
@@ -233,11 +238,12 @@ with tab1:
             adjuntos_actuales = [p for p in equipo_actual if p in SURGEONS]
             residentes_actuales = [p for p in equipo_actual if p in RESIDENTS]
             
-            c_adj_m, c_res_m = st.columns(2)
+            c_hc_m, c_adj_m, c_res_m = st.columns([1, 2, 2])
+            nuevo_hc = c_hc_m.text_input("HC (Hist. Clínica)", value=row_mod.get("HC", ""), key="mod_hc")
             nuevos_adj = c_adj_m.multiselect("Adjunto(s)", SURGEONS, default=adjuntos_actuales, key="mod_adj")
             nuevos_res = c_res_m.multiselect("Residente(s)", RESIDENTS, default=residentes_actuales, key="mod_res")
             
-            if st.button("🔄 Actualizar Equipo", type="primary", key="btn_mod"):
+            if st.button("🔄 Actualizar Datos", type="primary", key="btn_mod"):
                 nuevo_equipo = nuevos_adj + nuevos_res
                 
                 if not nuevo_equipo:
@@ -280,10 +286,11 @@ with tab1:
                         for p in añadidos:
                             st.session_state.matrix_df.at[row_mod["Fecha"], p] = "Q"
                         
+                        st.session_state.quirofanos_df.at[idx_mod, "HC"] = nuevo_hc
                         st.session_state.quirofanos_df.at[idx_mod, "Equipo"] = ", ".join(nuevo_equipo)
                         st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
                         st.session_state.update_counter += 1
-                        st.success("✅ Equipo actualizado correctamente.")
+                        st.success("✅ Asignación actualizada correctamente.")
                         st.rerun()
 
         with tab_sus:
@@ -319,11 +326,9 @@ with tab1:
 with tab2:
     st.header("Matriz de Personal")
     
-    # 1. Separamos los datos en dos tablas
     df_adjuntos = st.session_state.matrix_df[SURGEONS]
     df_residentes = st.session_state.matrix_df[RESIDENTS]
     
-    # 2. Mostramos la tabla de ADJUNTOS
     st.subheader("👨‍⚕️ Adjuntos")
     dropdown_adj = {col: st.column_config.SelectboxColumn(options=ALL_STATUSES, required=False) for col in SURGEONS}
     styled_adj = df_adjuntos.style.apply(lambda x: style_matrix(df_adjuntos), axis=None)
@@ -338,7 +343,6 @@ with tab2:
     
     st.divider()
     
-    # 3. Mostramos la tabla de RESIDENTES
     st.subheader("📚 Residentes")
     dropdown_res = {col: st.column_config.SelectboxColumn(options=ALL_STATUSES, required=False) for col in RESIDENTS}
     styled_res = df_residentes.style.apply(lambda x: style_matrix(df_residentes), axis=None)
@@ -351,9 +355,8 @@ with tab2:
         key=f"editor_res_{st.session_state.update_counter}" 
     )
     
-    # 4. Juntamos las dos tablas por debajo para comprobar reglas y guardar
     combined_df = pd.concat([edited_adj, edited_res], axis=1)
-    combined_df = combined_df[ALL_STAFF] # Aseguramos el orden original
+    combined_df = combined_df[ALL_STAFF]
     
     processed_df = apply_guardia_rules(combined_df.copy())
     
@@ -431,3 +434,22 @@ with tab3:
             st.success(f"**Personal disponible ('Libre') el {disp_date}:**\n\n" + ", ".join(disponibles))
         else:
             st.warning("No hay personal en estado 'Libre' este día.")
+            
+    st.divider()
+    
+    # NUEVA SECCIÓN DE GUARDIAS MENSUALES
+    st.subheader("D) Cuadrante Mensual de Guardias")
+    
+    guardias_list = []
+    for date_idx, row in st.session_state.matrix_df.iterrows():
+        adjuntos_guardia = [p for p in SURGEONS if str(row[p]).strip().upper().startswith("G")]
+        residentes_guardia = [p for p in RESIDENTS if str(row[p]).strip().upper().startswith("G")]
+        
+        guardias_list.append({
+            "Fecha": date_idx,
+            "Adjuntos de Guardia": ", ".join(adjuntos_guardia),
+            "Residentes de Guardia": ", ".join(residentes_guardia)
+        })
+        
+    guardias_df = pd.DataFrame(guardias_list)
+    st.dataframe(guardias_df, hide_index=True, use_container_width=True)
