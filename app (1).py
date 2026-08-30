@@ -132,7 +132,7 @@ with st.sidebar:
     st.divider()
     
     st.subheader("Cargar Datos")
-    uploaded_file = st.file_uploader("Sube tu matriz (Excel/CSV)", type=["xlsx", "csv"])
+    uploaded_file = st.file_uploader("Sube tu matriz (Excel/CSV)", type=["xlsx", "csv", "ods"])
     if uploaded_file is not None:
         if st.button("📥 Confirmar Carga de Archivo", type="primary"):
             try:
