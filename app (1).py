@@ -355,7 +355,7 @@ with st.sidebar:
 # ==========================================
 # 5. INTERFAZ: PANEL CENTRAL
 # ==========================================
-st.title("Gestión del Servicio de Cirugía General (v4.0)")
+st.title("Gestión del Servicio de Cirugía General (v4.1)")
 
 tab1, tab2, tab3 = st.tabs(["🏥 A: Gestor de Quirófanos", "📊 B: Matriz General", "📋 Resumen y Disponibilidad"])
 
@@ -366,7 +366,11 @@ with tab1:
     q_date = c1.selectbox("Fecha", st.session_state.matrix_df.index)
     q_unidad = c_uni.selectbox("Unidad", ["A", "B", "C", "D"])
     q_grupo = c2.selectbox("Grupo", ["Insular", "Materno"])
-    q_sala = c3.selectbox("Quirófano", [f"Q{i}" for i in range(1, 9)])
+    
+    # Lógica inteligente: Q1 a Q15 para Insular, Q1 a Q8 para Materno
+    lista_salas = [f"Q{i}" for i in range(1, 16)] if q_grupo == "Insular" else [f"Q{i}" for i in range(1, 9)]
+    q_sala = c3.selectbox("Quirófano", lista_salas)
+    
     q_turno = c4.selectbox("Turno", ["Mañana", "Tarde"])
     q_hc = c5.text_input("Nº HC (Hist. Clínica)")
     
