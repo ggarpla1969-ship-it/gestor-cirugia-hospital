@@ -84,19 +84,24 @@ def style_matrix(df):
     for row in df.index:
         is_weekend = "(Sábado)" in str(row) or "(Domingo)" in str(row)
         for col in df.columns:
-            val = str(df.at[row, col])
+            val = str(df.at[row, col]).strip().upper()
             cell_style = ""
             if is_weekend:
                 cell_style += "background-color: #f0f2f6; "
+            
             if val.startswith("G"):
                 cell_style += "color: #d32f2f; font-weight: bold; "
             elif " + Q" in val or val == "Q + Q":
                 cell_style += "color: #1565c0; font-weight: bold; " 
+            elif val in ["VAC", "BAJA", "CUR-CONGR."]:
+                cell_style += "background-color: #ffcdd2; color: #b71c1c; font-weight: bold; "
+                
             styles.at[row, col] = cell_style
     return styles
 
 def parsear_fecha_robusta(raw_date):
-    """Función de ayuda para leer fechas en múltiples formatos"""
+    if raw_date is None or str(raw_date).strip() in ["nan", "", "None", "NAT"]:
+        return None
     raw_date = str(raw_date).strip()
     match_iso = re.search(r'^(\d{4})-(\d{2})-(\d{2})', raw_date)
     if match_iso:
@@ -198,7 +203,6 @@ def process_consultas_ods(uploaded_file, matrix_df):
     return matrix_df, actualizados, informe
 
 def process_ausencias_ods(uploaded_file, matrix_df):
-    """Procesa el archivo ODS de AUSENCIAS POR RANGOS DE FECHAS (Médico, Inicio, Fin, Motivo)"""
     file_name = uploaded_file.name.lower()
     if file_name.endswith('.ods'): df_a = pd.read_excel(uploaded_file, engine='odf')
     elif file_name.endswith(('.xlsx', '.xls')): df_a = pd.read_excel(uploaded_file)
@@ -211,7 +215,6 @@ def process_ausencias_ods(uploaded_file, matrix_df):
     df_a.columns = ['Medico', 'Inicio', 'Fin', 'Motivo']
     staff_map = {str(col).strip().upper(): col for col in matrix_df.columns}
     
-    # Mapear fechas del mes actual de la matriz a objetos datetime.date para comparar rangos
     matrix_dates = {}
     for idx in matrix_df.index:
         match = re.search(r'\d{2}/\d{2}/\d{4}', str(idx))
@@ -224,14 +227,18 @@ def process_ausencias_ods(uploaded_file, matrix_df):
 
     for fila_num, row in df_a.iterrows():
         med_raw = str(row['Medico']).strip().upper()
-        if med_raw in ["NAN", "", "NONE", "MEDICO"]: continue
+        ini_raw = row['Inicio']
+        fin_raw = row['Fin']
+        mot_raw = row['Motivo']
 
-        inicio_str = parsear_fecha_robusta(row['Inicio'])
-        fin_str = parsear_fecha_robusta(row['Fin'])
-        motivo = str(row['Motivo']).strip().upper()
+        if med_raw in ["NAN", "", "NONE", "MEDICO"] and pd.isna(ini_raw) and pd.isna(fin_raw):
+            continue
+
+        inicio_str = parsear_fecha_robusta(ini_raw)
+        fin_str = parsear_fecha_robusta(fin_raw)
+        motivo = str(mot_raw).strip().upper() if not pd.isna(mot_raw) else "VAC"
 
         if not inicio_str or not fin_str:
-            informe.append(f"❌ Fila {fila_num + 2}: Fechas de inicio/fin no válidas para {med_raw}.")
             continue
 
         if med_raw not in staff_map:
@@ -242,7 +249,6 @@ def process_ausencias_ods(uploaded_file, matrix_df):
         p_ini = datetime.date(int(inicio_str.split('/')[2]), int(inicio_str.split('/')[1]), int(inicio_str.split('/')[0]))
         p_fin = datetime.date(int(fin_str.split('/')[2]), int(fin_str.split('/')[1]), int(fin_str.split('/')[0]))
 
-        # Aplicar el motivo a todos los días del rango que coincidan con este mes
         for d_obj, row_idx in matrix_dates.items():
             if p_ini <= d_obj <= p_fin:
                 matrix_df.at[row_idx, col_real] = motivo
@@ -290,7 +296,6 @@ with st.sidebar:
     
     st.subheader("📥 Cargar Datos (Recuperar)")
     
-    # 1. CARGA DE LA MATRIZ GENERAL
     uploaded_file = st.file_uploader("1a. Sube tu Matriz General", type=["xlsx", "csv", "ods"], key="up_matriz")
     if uploaded_file is not None:
         if st.button("📥 Cargar Matriz", type="primary"):
@@ -308,7 +313,6 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"Error al cargar matriz: {e}")
 
-    # 1B. CARGA DE GUARDIAS
     uploaded_guardias = st.file_uploader("1b. Sube Guardias (Adjuntos/Residentes)", type=["ods", "xlsx", "csv"], key="up_guardias")
     if uploaded_guardias is not None:
         if st.button("🚨 Importar Guardias", type="primary"):
@@ -322,7 +326,6 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"Error al procesar el archivo de guardias: {e}")
 
-    # 1C. CARGA DE CONSULTAS
     uploaded_consultas = st.file_uploader("1c. Sube Consultas Extrahospitalarias", type=["ods", "xlsx", "csv"], key="up_consultas")
     if uploaded_consultas is not None:
         if st.button("🩺 Importar Consultas", type="primary"):
@@ -336,7 +339,6 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"Error al procesar el archivo de consultas: {e}")
 
-    # 1D. CARGA DE AUSENCIAS (VACACIONES / BAJAS / CONGRESOS)
     uploaded_ausencias = st.file_uploader("1d. Sube Ausencias (Vacaciones/Bajas)", type=["ods", "xlsx", "csv"], key="up_ausencias")
     if uploaded_ausencias is not None:
         if st.button("🌴 Importar Ausencias", type="primary"):
@@ -350,7 +352,6 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"Error al procesar el archivo de ausencias: {e}")
 
-    # 2. CARGA DEL REGISTRO DE QUIRÓFANOS
     uploaded_q = st.file_uploader("2. Sube tu Registro Quirófanos", type=["xlsx", "csv", "ods"], key="up_q")
     if uploaded_q is not None:
         if st.button("📥 Cargar Quirófanos", type="primary"):
@@ -385,7 +386,7 @@ with st.sidebar:
 # ==========================================
 # 5. INTERFAZ: PANEL CENTRAL
 # ==========================================
-st.title("Gestión del Servicio de Cirugía General (v5.0)")
+st.title("Gestión del Servicio de Cirugía General (v5.2)")
 
 tab1, tab2, tab3 = st.tabs(["🏥 A: Gestor de Quirófanos", "📊 B: Matriz General", "📋 Resumen y Disponibilidad"])
 
