@@ -96,7 +96,7 @@ def style_matrix(df):
     return styles
 
 def process_guardias_ods(uploaded_file, matrix_df):
-    """Procesa el archivo ODS/XLSX/CSV con las guardias en col1 (Fecha), col2 (Cirujano 1) y col3 (Cirujano 2)"""
+    """Procesa el archivo ODS/XLSX/CSV con las guardias y devuelve la matriz actualizada"""
     file_name = uploaded_file.name.lower()
     if file_name.endswith('.ods'):
         df_g = pd.read_excel(uploaded_file, engine='odf')
@@ -114,19 +114,26 @@ def process_guardias_ods(uploaded_file, matrix_df):
     df_g = df_g.iloc[:, :3]
     df_g.columns = ['Fecha_Raw', 'Cirujano_1', 'Cirujano_2']
 
-    # Mapeo de fechas para coincidir con el índice de la matriz
+    # Crear mapa de fechas (dd/mm/yyyy -> Índice completo de la matriz)
     index_map = {}
     for idx in matrix_df.index:
-        # Extraer solo la fecha dd/mm/yyyy del índice
         match = re.search(r'\d{2}/\d{2}/\d{4}', str(idx))
         if match:
             index_map[match.group(0)] = idx
 
     actualizados = 0
-    for _, row in df_g.iterrows():
-        raw_date = str(row['Fecha_Raw'])
-        c1 = str(row['Cirujano_1']).strip()
-        c2 = str(row['Cirujano_2']).strip()
+    no_encontrados = []
+
+    # Crear mapa insensible a mayúsculas/minúsculas y espacios para el personal
+    staff_map = {str(col).strip().upper(): col for col in matrix_df.columns}
+
+    for fila_num, row in df_g.iterrows():
+        raw_date = str(row['Fecha_Raw']).strip()
+        c1_raw = str(row['Cirujano_1']).strip().upper()
+        c2_raw = str(row['Cirujano_2']).strip().upper()
+
+        if raw_date in ["nan", "", "None"] or (c1_raw in ["NAN", "", "NONE"] and c2_raw in ["NAN", "", "NONE"]):
+            continue
 
         # Parsear fecha
         parsed_date_str = None
@@ -140,17 +147,35 @@ def process_guardias_ods(uploaded_file, matrix_df):
 
         if parsed_date_str and parsed_date_str in index_map:
             row_idx = index_map[parsed_date_str]
-            for cirujano in [c1, c2]:
-                if cirujano in matrix_df.columns:
-                    est_actual = str(matrix_df.at[row_idx, cirujano]).strip()
+            
+            for c_raw in [c1_raw, c2_raw]:
+                if c_raw in ["NAN", "", "NONE"]:
+                    continue
+                
+                # Buscar coincidencia exacta del código
+                if c_raw in staff_map:
+                    col_real = staff_map[c_raw]
+                    est_actual = str(matrix_df.at[row_idx, col_real]).strip()
+                    
                     if est_actual in ["Libre", "none", "", "nan"]:
-                        matrix_df.at[row_idx, cirujano] = "G"
+                        matrix_df.at[row_idx, col_real] = "G"
                     elif "G" not in est_actual:
-                        matrix_df.at[row_idx, cirujano] = f"G + {est_actual}"
+                        matrix_df.at[row_idx, col_real] = f"G + {est_actual}"
                     actualizados += 1
+                else:
+                    no_encontrados.append(f"Fila {fila_num + 2}: Código '{c_raw}' no reconocido (Revisar nombres).")
+        else:
+            no_encontrados.append(f"Fila {fila_num + 2}: Fecha '{raw_date}' no coincide con el mes de la matriz.")
 
-    # Aplicar automáticamente reglas de salida de guardia
+    # Aplicar reglas de Salida de Guardia
     matrix_df = apply_guardia_rules(matrix_df)
+    
+    if no_encontrados:
+        st.warning(f"⚠️ Se procesaron datos, pero hubo {len(no_encontrados)} observaciones:")
+        with st.expander("Ver detalle de filas no procesadas"):
+            for err in no_encontrados:
+                st.write(f"- {err}")
+
     return matrix_df, actualizados
 
 # ==========================================
@@ -209,7 +234,7 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"Error al cargar matriz: {e}")
 
-    # 1B. NUEVO: CARGA DE GUARDIAS DESDE ARCHIVO ODS / EXCEL / CSV
+    # 1B. CARGA DE GUARDIAS DESDE ARCHIVO ODS / EXCEL / CSV
     uploaded_guardias = st.file_uploader("1b. Sube tu Cuadrante de Guardias (3 Cols)", type=["ods", "xlsx", "csv"], key="up_guardias")
     if uploaded_guardias is not None:
         if st.button("🚨 Importar Guardias a la Matriz", type="primary"):
@@ -261,7 +286,7 @@ with st.sidebar:
 # ==========================================
 # 5. INTERFAZ: PANEL CENTRAL
 # ==========================================
-st.title("Gestión del Servicio de Cirugía General (v2.5)")
+st.title("Gestión del Servicio de Cirugía General (v2.6)")
 
 tab1, tab2, tab3 = st.tabs(["🏥 A: Gestor de Quirófanos", "📊 B: Matriz General", "📋 Resumen y Disponibilidad"])
 
@@ -596,6 +621,10 @@ with tab3:
             "Fecha": date_idx,
             "Adjuntos de Guardia": ", ".join(adjuntos_guardia),
             "Residentes de Guardia": ", ".join(residentes_guardia)
+        })
+        
+    guardias_df = pd.DataFrame(guardias_list)
+    st.dataframe(guardias_df, hide_index=True, use_container_width=True)
         })
         
     guardias_df = pd.DataFrame(guardias_list)
