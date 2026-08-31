@@ -625,7 +625,3 @@ with tab3:
         
     guardias_df = pd.DataFrame(guardias_list)
     st.dataframe(guardias_df, hide_index=True, use_container_width=True)
-        })
-        
-    guardias_df = pd.DataFrame(guardias_list)
-    st.dataframe(guardias_df, hide_index=True, use_container_width=True)
