@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import datetime
 import calendar
+import re
 
 # ==========================================
 # 1. CONFIGURACIÓN Y CONSTANTES
@@ -94,6 +95,64 @@ def style_matrix(df):
             styles.at[row, col] = cell_style
     return styles
 
+def process_guardias_ods(uploaded_file, matrix_df):
+    """Procesa el archivo ODS/XLSX/CSV con las guardias en col1 (Fecha), col2 (Cirujano 1) y col3 (Cirujano 2)"""
+    file_name = uploaded_file.name.lower()
+    if file_name.endswith('.ods'):
+        df_g = pd.read_excel(uploaded_file, engine='odf')
+    elif file_name.endswith(('.xlsx', '.xls')):
+        df_g = pd.read_excel(uploaded_file)
+    elif file_name.endswith('.csv'):
+        df_g = pd.read_csv(uploaded_file)
+    else:
+        raise ValueError("Formato no soportado")
+
+    if df_g.shape[1] < 3:
+        raise ValueError("El archivo debe incluir al menos 3 columnas: Fecha, Cirujano 1 y Cirujano 2")
+
+    # Extraer 3 primeras columnas
+    df_g = df_g.iloc[:, :3]
+    df_g.columns = ['Fecha_Raw', 'Cirujano_1', 'Cirujano_2']
+
+    # Mapeo de fechas para coincidir con el índice de la matriz
+    index_map = {}
+    for idx in matrix_df.index:
+        # Extraer solo la fecha dd/mm/yyyy del índice
+        match = re.search(r'\d{2}/\d{2}/\d{4}', str(idx))
+        if match:
+            index_map[match.group(0)] = idx
+
+    actualizados = 0
+    for _, row in df_g.iterrows():
+        raw_date = str(row['Fecha_Raw'])
+        c1 = str(row['Cirujano_1']).strip()
+        c2 = str(row['Cirujano_2']).strip()
+
+        # Parsear fecha
+        parsed_date_str = None
+        try:
+            date_dt = pd.to_datetime(raw_date, dayfirst=True)
+            parsed_date_str = date_dt.strftime('%d/%m/%Y')
+        except:
+            match = re.search(r'\d{2}/\d{2}/\d{4}', raw_date)
+            if match:
+                parsed_date_str = match.group(0)
+
+        if parsed_date_str and parsed_date_str in index_map:
+            row_idx = index_map[parsed_date_str]
+            for cirujano in [c1, c2]:
+                if cirujano in matrix_df.columns:
+                    est_actual = str(matrix_df.at[row_idx, cirujano]).strip()
+                    if est_actual in ["Libre", "none", "", "nan"]:
+                        matrix_df.at[row_idx, cirujano] = "G"
+                    elif "G" not in est_actual:
+                        matrix_df.at[row_idx, cirujano] = f"G + {est_actual}"
+                    actualizados += 1
+
+    # Aplicar automáticamente reglas de salida de guardia
+    matrix_df = apply_guardia_rules(matrix_df)
+    return matrix_df, actualizados
+
 # ==========================================
 # 3. INICIALIZACIÓN DEL ESTADO
 # ==========================================
@@ -132,13 +191,15 @@ with st.sidebar:
     
     st.subheader("📥 Cargar Datos (Recuperar)")
     
-    # 1. CARGA DE LA MATRIZ
+    # 1. CARGA DE LA MATRIZ GENERAL
     uploaded_file = st.file_uploader("1. Sube tu Matriz General", type=["xlsx", "csv", "ods"], key="up_matriz")
     if uploaded_file is not None:
         if st.button("📥 Cargar Matriz", type="primary"):
             try:
                 if uploaded_file.name.endswith('.csv'):
                     st.session_state.matrix_df = pd.read_csv(uploaded_file, index_col=0)
+                elif uploaded_file.name.endswith('.ods'):
+                    st.session_state.matrix_df = pd.read_excel(uploaded_file, index_col=0, engine='odf')
                 else:
                     st.session_state.matrix_df = pd.read_excel(uploaded_file, index_col=0)
                 st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
@@ -147,7 +208,19 @@ with st.sidebar:
                 st.rerun()
             except Exception as e:
                 st.error(f"Error al cargar matriz: {e}")
-                
+
+    # 1B. NUEVO: CARGA DE GUARDIAS DESDE ARCHIVO ODS / EXCEL / CSV
+    uploaded_guardias = st.file_uploader("1b. Sube tu Cuadrante de Guardias (3 Cols)", type=["ods", "xlsx", "csv"], key="up_guardias")
+    if uploaded_guardias is not None:
+        if st.button("🚨 Importar Guardias a la Matriz", type="primary"):
+            try:
+                st.session_state.matrix_df, count = process_guardias_ods(uploaded_guardias, st.session_state.matrix_df)
+                st.session_state.update_counter += 1
+                st.success(f"✅ ¡Guardias cargadas correctamente! ({count} asignaciones procesadas)")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error al procesar el archivo de guardias: {e}")
+
     # 2. CARGA DEL REGISTRO DE QUIRÓFANOS
     uploaded_q = st.file_uploader("2. Sube tu Registro Quirófanos", type=["xlsx", "csv", "ods"], key="up_q")
     if uploaded_q is not None:
@@ -155,10 +228,11 @@ with st.sidebar:
             try:
                 if uploaded_q.name.endswith('.csv'):
                     st.session_state.quirofanos_df = pd.read_csv(uploaded_q)
+                elif uploaded_q.name.endswith('.ods'):
+                    st.session_state.quirofanos_df = pd.read_excel(uploaded_q, engine='odf')
                 else:
                     st.session_state.quirofanos_df = pd.read_excel(uploaded_q)
                 
-                # Nos aseguramos de que HC se trate siempre como texto, no como número
                 if 'HC' not in st.session_state.quirofanos_df.columns:
                     st.session_state.quirofanos_df['HC'] = ""
                 st.session_state.quirofanos_df['HC'] = st.session_state.quirofanos_df['HC'].astype(str).replace("nan", "")
@@ -187,7 +261,7 @@ with st.sidebar:
 # ==========================================
 # 5. INTERFAZ: PANEL CENTRAL
 # ==========================================
-st.title("Gestión del Servicio de Cirugía General (v2.4)")
+st.title("Gestión del Servicio de Cirugía General (v2.5)")
 
 tab1, tab2, tab3 = st.tabs(["🏥 A: Gestor de Quirófanos", "📊 B: Matriz General", "📋 Resumen y Disponibilidad"])
 
@@ -259,7 +333,6 @@ with tab1:
                     elif estado_actual == "Q":
                         st.session_state.matrix_df.at[q_date, p] = "Q + Q"
                     elif "Q" not in estado_actual:
-                        # Añade el "+ Q" a CUALQUIER estado no bloqueado que no tuviera Q (incluye a las "G")
                         st.session_state.matrix_df.at[q_date, p] = f"{estado_actual} + Q"
                     
                 st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
