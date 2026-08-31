@@ -96,7 +96,7 @@ def style_matrix(df):
     return styles
 
 def process_guardias_ods(uploaded_file, matrix_df):
-    """Procesa el archivo ODS/XLSX/CSV con las guardias y devuelve la matriz actualizada"""
+    """Procesa el archivo ODS/XLSX/CSV con informe detallado de cada fila"""
     file_name = uploaded_file.name.lower()
     if file_name.endswith('.ods'):
         df_g = pd.read_excel(uploaded_file, engine='odf')
@@ -110,11 +110,9 @@ def process_guardias_ods(uploaded_file, matrix_df):
     if df_g.shape[1] < 3:
         raise ValueError("El archivo debe incluir al menos 3 columnas: Fecha, Cirujano 1 y Cirujano 2")
 
-    # Extraer 3 primeras columnas
     df_g = df_g.iloc[:, :3]
     df_g.columns = ['Fecha_Raw', 'Cirujano_1', 'Cirujano_2']
 
-    # Crear mapa de fechas (dd/mm/yyyy -> Índice completo de la matriz)
     index_map = {}
     for idx in matrix_df.index:
         match = re.search(r'\d{2}/\d{2}/\d{4}', str(idx))
@@ -122,9 +120,7 @@ def process_guardias_ods(uploaded_file, matrix_df):
             index_map[match.group(0)] = idx
 
     actualizados = 0
-    no_encontrados = []
-
-    # Crear mapa insensible a mayúsculas/minúsculas y espacios para el personal
+    informe_proceso = []
     staff_map = {str(col).strip().upper(): col for col in matrix_df.columns}
 
     for fila_num, row in df_g.iterrows():
@@ -132,27 +128,29 @@ def process_guardias_ods(uploaded_file, matrix_df):
         c1_raw = str(row['Cirujano_1']).strip().upper()
         c2_raw = str(row['Cirujano_2']).strip().upper()
 
-        if raw_date in ["nan", "", "None"] or (c1_raw in ["NAN", "", "NONE"] and c2_raw in ["NAN", "", "NONE"]):
+        # Omitir cabeceras o filas totalmente vacías
+        if raw_date in ["nan", "", "None"] or "FECHA" in raw_date.upper():
+            continue
+        if c1_raw in ["NAN", "", "NONE", "CIRUJANO 1"] and c2_raw in ["NAN", "", "NONE", "CIRUJANO 2"]:
             continue
 
-        # Parsear fecha
         parsed_date_str = None
         try:
             date_dt = pd.to_datetime(raw_date, dayfirst=True)
             parsed_date_str = date_dt.strftime('%d/%m/%Y')
         except:
-            match = re.search(r'\d{2}/\d{2}/\d{4}', raw_date)
+            match = re.search(r'\d{1,2}/\d{1,2}/\d{4}', raw_date)
             if match:
-                parsed_date_str = match.group(0)
+                parts = match.group(0).split('/')
+                parsed_date_str = f"{int(parts[0]):02d}/{int(parts[1]):02d}/{parts[2]}"
 
         if parsed_date_str and parsed_date_str in index_map:
             row_idx = index_map[parsed_date_str]
+            asignados_en_fila = []
             
             for c_raw in [c1_raw, c2_raw]:
                 if c_raw in ["NAN", "", "NONE"]:
                     continue
-                
-                # Buscar coincidencia exacta del código
                 if c_raw in staff_map:
                     col_real = staff_map[c_raw]
                     est_actual = str(matrix_df.at[row_idx, col_real]).strip()
@@ -162,19 +160,24 @@ def process_guardias_ods(uploaded_file, matrix_df):
                     elif "G" not in est_actual:
                         matrix_df.at[row_idx, col_real] = f"G + {est_actual}"
                     actualizados += 1
+                    asignados_en_fila.append(col_real)
                 else:
-                    no_encontrados.append(f"Fila {fila_num + 2}: Código '{c_raw}' no reconocido (Revisar nombres).")
+                    informe_proceso.append(f"⚠️ Fila {fila_num + 1} ({parsed_date_str}): Código de médico '{c_raw}' no reconocido en la plantilla.")
+            
+            if asignados_en_fila:
+                informe_proceso.append(f"✅ Fila {fila_num + 1} ({parsed_date_str}): Guardias aplicadas a {', '.join(asignados_en_fila)}")
+            else:
+                informe_proceso.append(f"ℹ️ Fila {fila_num + 1} ({parsed_date_str}): Fecha válida, pero sin cirujanos especificados en las columnas 2 y 3.")
         else:
-            no_encontrados.append(f"Fila {fila_num + 2}: Fecha '{raw_date}' no coincide con el mes de la matriz.")
+            informe_proceso.append(f"❌ Fila {fila_num + 1}: Fecha '{raw_date}' no coincide con el mes cargado en la matriz.")
 
-    # Aplicar reglas de Salida de Guardia
     matrix_df = apply_guardia_rules(matrix_df)
-    
-    if no_encontrados:
-        st.warning(f"⚠️ Se procesaron datos, pero hubo {len(no_encontrados)} observaciones:")
-        with st.expander("Ver detalle de filas no procesadas"):
-            for err in no_encontrados:
-                st.write(f"- {err}")
+
+    # Mostrar informe detallado automáticamente en pantalla
+    with st.expander("🔍 INFORME DE DIAGNÓSTICO DE IMPORTACIÓN", expanded=True):
+        st.write(f"Total de asignaciones aplicadas: {actualizados}")
+        for lin in informe_proceso:
+            st.write(lin)
 
     return matrix_df, actualizados
 
@@ -241,7 +244,7 @@ with st.sidebar:
             try:
                 st.session_state.matrix_df, count = process_guardias_ods(uploaded_guardias, st.session_state.matrix_df)
                 st.session_state.update_counter += 1
-                st.success(f"✅ ¡Guardias cargadas correctamente! ({count} asignaciones procesadas)")
+                st.success(f"✅ ¡Importación finalizada! ({count} asignaciones procesadas)")
                 st.rerun()
             except Exception as e:
                 st.error(f"Error al procesar el archivo de guardias: {e}")
@@ -286,7 +289,7 @@ with st.sidebar:
 # ==========================================
 # 5. INTERFAZ: PANEL CENTRAL
 # ==========================================
-st.title("Gestión del Servicio de Cirugía General (v2.6)")
+st.title("Gestión del Servicio de Cirugía General (v2.7)")
 
 tab1, tab2, tab3 = st.tabs(["🏥 A: Gestor de Quirófanos", "📊 B: Matriz General", "📋 Resumen y Disponibilidad"])
 
@@ -601,7 +604,7 @@ with tab3:
     disp_date = st.selectbox("Fecha para consultar disponibilidad:", st.session_state.matrix_df.index)
     if disp_date:
         dia_datos = st.session_state.matrix_df.loc[disp_date]
-        disponibles = [staff for staff, estado in dia_datos.items() if str(estado) == "Libre"]
+        disporibles = [staff for staff, estado in dia_datos.items() if str(estado) == "Libre"]
         
         if disponibles:
             st.success(f"**Personal disponible ('Libre') el {disp_date}:**\n\n" + ", ".join(disponibles))
