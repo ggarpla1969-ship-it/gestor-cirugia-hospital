@@ -95,71 +95,57 @@ def style_matrix(df):
             styles.at[row, col] = cell_style
     return styles
 
+def parsear_fecha_robusta(raw_date):
+    """Función de ayuda para leer fechas en múltiples formatos"""
+    raw_date = str(raw_date).strip()
+    match_iso = re.search(r'^(\d{4})-(\d{2})-(\d{2})', raw_date)
+    if match_iso:
+        return f"{match_iso.group(3)}/{match_iso.group(2)}/{match_iso.group(1)}"
+    
+    match_eu = re.search(r'^(\d{1,2})[/-](\d{1,2})[/-](\d{4})', raw_date)
+    if match_eu:
+        return f"{int(match_eu.group(1)):02d}/{int(match_eu.group(2)):02d}/{match_eu.group(3)}"
+    
+    try:
+        date_obj = pd.to_datetime(raw_date, dayfirst=True)
+        return date_obj.strftime('%d/%m/%Y')
+    except:
+        return None
+
 def process_guardias_ods(uploaded_file, matrix_df):
-    """Procesa el archivo ODS con sistema de parseo de fechas a prueba de fallos"""
+    """Procesa el archivo ODS de GUARDIAS (Múltiples columnas dinámicas)"""
     file_name = uploaded_file.name.lower()
-    if file_name.endswith('.ods'):
-        df_g = pd.read_excel(uploaded_file, engine='odf')
-    elif file_name.endswith(('.xlsx', '.xls')):
-        df_g = pd.read_excel(uploaded_file)
-    elif file_name.endswith('.csv'):
-        df_g = pd.read_csv(uploaded_file)
-    else:
-        raise ValueError("Formato no soportado")
-
-    if df_g.shape[1] < 3:
-        raise ValueError("El archivo debe incluir al menos 3 columnas: Fecha, Cirujano 1 y Cirujano 2")
-
-    df_g = df_g.iloc[:, :3]
-    df_g.columns = ['Fecha_Raw', 'Cirujano_1', 'Cirujano_2']
+    if file_name.endswith('.ods'): df_g = pd.read_excel(uploaded_file, engine='odf')
+    elif file_name.endswith(('.xlsx', '.xls')): df_g = pd.read_excel(uploaded_file)
+    elif file_name.endswith('.csv'): df_g = pd.read_csv(uploaded_file)
+    else: raise ValueError("Formato no soportado")
 
     index_map = {}
     for idx in matrix_df.index:
         match = re.search(r'\d{2}/\d{2}/\d{4}', str(idx))
-        if match:
-            index_map[match.group(0)] = idx
+        if match: index_map[match.group(0)] = idx
 
     actualizados = 0
     informe_proceso = []
     staff_map = {str(col).strip().upper(): col for col in matrix_df.columns}
 
     for fila_num, row in df_g.iterrows():
-        raw_date = str(row['Fecha_Raw']).strip()
-        c1_raw = str(row['Cirujano_1']).strip().upper()
-        c2_raw = str(row['Cirujano_2']).strip().upper()
-
+        raw_date = str(row.iloc[0]).strip()
         if raw_date in ["nan", "", "None"] or "FECHA" in raw_date.upper():
             continue
-        if c1_raw in ["NAN", "", "NONE", "CIRUJANO 1"] and c2_raw in ["NAN", "", "NONE", "CIRUJANO 2"]:
-            continue
 
-        parsed_date_str = None
-        
-        # --- NUEVA LÓGICA TODOTERRENO PARA PARSEAR FECHAS ---
-        # 1. Detectar patrón ISO primero (2026-09-01)
-        match_iso = re.search(r'^(\d{4})-(\d{2})-(\d{2})', raw_date)
-        if match_iso:
-            parsed_date_str = f"{match_iso.group(3)}/{match_iso.group(2)}/{match_iso.group(1)}"
-        else:
-            # 2. Detectar patrón Europeo (01/09/2026)
-            match_eu = re.search(r'^(\d{1,2})[/-](\d{1,2})[/-](\d{4})', raw_date)
-            if match_eu:
-                parsed_date_str = f"{int(match_eu.group(1)):02d}/{int(match_eu.group(2)):02d}/{match_eu.group(3)}"
-            else:
-                # 3. Fallback a Pandas
-                try:
-                    date_obj = pd.to_datetime(raw_date, dayfirst=True)
-                    parsed_date_str = date_obj.strftime('%d/%m/%Y')
-                except:
-                    pass
+        parsed_date_str = parsear_fecha_robusta(raw_date)
 
         if parsed_date_str and parsed_date_str in index_map:
             row_idx = index_map[parsed_date_str]
             asignados_en_fila = []
             
-            for c_raw in [c1_raw, c2_raw]:
+            # Recorrer todas las columnas desde la columna 2 en adelante
+            for i in range(1, len(row)):
+                c_raw = str(row.iloc[i]).strip().upper()
                 if c_raw in ["NAN", "", "NONE"]:
                     continue
+                
                 if c_raw in staff_map:
                     col_real = staff_map[c_raw]
                     est_actual = str(matrix_df.at[row_idx, col_real]).strip()
@@ -171,23 +157,79 @@ def process_guardias_ods(uploaded_file, matrix_df):
                     actualizados += 1
                     asignados_en_fila.append(col_real)
                 else:
-                    informe_proceso.append(f"⚠️ Fila {fila_num + 2} ({parsed_date_str}): Código de médico '{c_raw}' no reconocido en la plantilla.")
+                    informe_proceso.append(f"⚠️ Fila {fila_num + 2} ({parsed_date_str}): Código '{c_raw}' no reconocido.")
             
             if asignados_en_fila:
-                informe_proceso.append(f"✅ Fila {fila_num + 2} ({parsed_date_str}): Guardias aplicadas a {', '.join(asignados_en_fila)}")
-            else:
-                informe_proceso.append(f"ℹ️ Fila {fila_num + 2} ({parsed_date_str}): Fecha válida, pero sin cirujanos especificados.")
+                informe_proceso.append(f"✅ Fila {fila_num + 2} ({parsed_date_str}): Guardias a {', '.join(asignados_en_fila)}")
         else:
             informe_proceso.append(f"❌ Fila {fila_num + 2}: Fecha cruda '{raw_date}' no procesada.")
 
     matrix_df = apply_guardia_rules(matrix_df)
+    return matrix_df, actualizados, informe_proceso
 
-    with st.expander("🔍 INFORME DE DIAGNÓSTICO DE IMPORTACIÓN", expanded=True):
-        st.write(f"Total de asignaciones aplicadas: {actualizados}")
-        for lin in informe_proceso:
-            st.write(lin)
+def process_consultas_ods(uploaded_file, matrix_df):
+    """Procesa el archivo ODS de CONSULTAS EXTRAHOSPITALARIAS"""
+    file_name = uploaded_file.name.lower()
+    if file_name.endswith('.ods'): df_c = pd.read_excel(uploaded_file, engine='odf')
+    elif file_name.endswith(('.xlsx', '.xls')): df_c = pd.read_excel(uploaded_file)
+    elif file_name.endswith('.csv'): df_c = pd.read_csv(uploaded_file)
+    else: raise ValueError("Formato no soportado")
 
-    return matrix_df, actualizados
+    index_map = {}
+    for idx in matrix_df.index:
+        match = re.search(r'\d{2}/\d{2}/\d{4}', str(idx))
+        if match: index_map[match.group(0)] = idx
+
+    actualizados = 0
+    informe_proceso = []
+    staff_map = {str(col).strip().upper(): col for col in matrix_df.columns}
+
+    for fila_num, row in df_c.iterrows():
+        raw_date = str(row.iloc[0]).strip()
+        if raw_date in ["nan", "", "None"] or "FECHA" in raw_date.upper():
+            continue
+
+        parsed_date_str = parsear_fecha_robusta(raw_date)
+
+        if parsed_date_str and parsed_date_str in index_map:
+            row_idx = index_map[parsed_date_str]
+            asignados_en_fila = []
+            
+            # Recorrer columnas buscando las consultas
+            for col_name in df_c.columns[1:]:
+                c_raw = str(row[col_name]).strip().upper()
+                if c_raw in ["NAN", "", "NONE"]:
+                    continue
+                
+                # Mapear el nombre de la columna a un estado válido
+                estado_asignar = str(col_name).strip().upper()
+                if "VEC" in estado_asignar: val_estado = "C.VEC."
+                elif "TELD" in estado_asignar: val_estado = "C.TELD."
+                elif "PRUD" in estado_asignar and "1" in estado_asignar: val_estado = "C.PRUD. 1"
+                elif "PRUD" in estado_asignar and "2" in estado_asignar: val_estado = "C.PRUD. 2"
+                elif "M" in estado_asignar: val_estado = "C. HOS M."
+                elif "T" in estado_asignar: val_estado = "C. HOS T."
+                else: val_estado = str(col_name).strip()
+
+                if c_raw in staff_map:
+                    col_real = staff_map[c_raw]
+                    est_actual = str(matrix_df.at[row_idx, col_real]).strip()
+                    
+                    if est_actual in ["Libre", "none", "", "nan"]:
+                        matrix_df.at[row_idx, col_real] = val_estado
+                    elif val_estado not in est_actual:
+                        matrix_df.at[row_idx, col_real] = f"{est_actual} + {val_estado}"
+                    actualizados += 1
+                    asignados_en_fila.append(f"{col_real} ({val_estado})")
+                else:
+                    informe_proceso.append(f"⚠️ Fila {fila_num + 2}: Código '{c_raw}' no reconocido.")
+            
+            if asignados_en_fila:
+                informe_proceso.append(f"✅ Fila {fila_num + 2} ({parsed_date_str}): {', '.join(asignados_en_fila)}")
+        else:
+            informe_proceso.append(f"❌ Fila {fila_num + 2}: Fecha cruda '{raw_date}' no procesada.")
+
+    return matrix_df, actualizados, informe_proceso
 
 # ==========================================
 # 3. INICIALIZACIÓN DEL ESTADO
@@ -228,7 +270,7 @@ with st.sidebar:
     st.subheader("📥 Cargar Datos (Recuperar)")
     
     # 1. CARGA DE LA MATRIZ GENERAL
-    uploaded_file = st.file_uploader("1. Sube tu Matriz General", type=["xlsx", "csv", "ods"], key="up_matriz")
+    uploaded_file = st.file_uploader("1a. Sube tu Matriz General", type=["xlsx", "csv", "ods"], key="up_matriz")
     if uploaded_file is not None:
         if st.button("📥 Cargar Matriz", type="primary"):
             try:
@@ -245,16 +287,33 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"Error al cargar matriz: {e}")
 
-    # 1B. CARGA DE GUARDIAS DESDE ARCHIVO ODS / EXCEL / CSV
-    uploaded_guardias = st.file_uploader("1b. Sube tu Cuadrante de Guardias (3 Cols)", type=["ods", "xlsx", "csv"], key="up_guardias")
+    # 1B. CARGA DE GUARDIAS DESDE ARCHIVO ODS (COLUMNAS DINÁMICAS)
+    uploaded_guardias = st.file_uploader("1b. Sube Guardias (Adjuntos o Residentes)", type=["ods", "xlsx", "csv"], key="up_guardias")
     if uploaded_guardias is not None:
-        if st.button("🚨 Importar Guardias a la Matriz", type="primary"):
+        if st.button("🚨 Importar Guardias", type="primary"):
             try:
-                st.session_state.matrix_df, count = process_guardias_ods(uploaded_guardias, st.session_state.matrix_df)
+                matriz_actualizada, count, informe = process_guardias_ods(uploaded_guardias, st.session_state.matrix_df)
+                st.session_state.matrix_df = matriz_actualizada
                 st.session_state.update_counter += 1
-                st.success(f"✅ ¡Importación finalizada! ({count} asignaciones procesadas)")
+                st.success(f"✅ ¡Importación finalizada! ({count} guardias asignadas)")
+                with st.expander("🔍 VER INFORME DE GUARDIAS", expanded=True):
+                    for lin in informe: st.write(lin)
             except Exception as e:
                 st.error(f"Error al procesar el archivo de guardias: {e}")
+
+    # 1C. CARGA DE CONSULTAS DESDE ARCHIVO ODS
+    uploaded_consultas = st.file_uploader("1c. Sube Consultas Extrahospitalarias", type=["ods", "xlsx", "csv"], key="up_consultas")
+    if uploaded_consultas is not None:
+        if st.button("🩺 Importar Consultas", type="primary"):
+            try:
+                matriz_actualizada, count, informe = process_consultas_ods(uploaded_consultas, st.session_state.matrix_df)
+                st.session_state.matrix_df = matriz_actualizada
+                st.session_state.update_counter += 1
+                st.success(f"✅ ¡Importación finalizada! ({count} consultas asignadas)")
+                with st.expander("🔍 VER INFORME DE CONSULTAS", expanded=True):
+                    for lin in informe: st.write(lin)
+            except Exception as e:
+                st.error(f"Error al procesar el archivo de consultas: {e}")
 
     # 2. CARGA DEL REGISTRO DE QUIRÓFANOS
     uploaded_q = st.file_uploader("2. Sube tu Registro Quirófanos", type=["xlsx", "csv", "ods"], key="up_q")
@@ -296,7 +355,7 @@ with st.sidebar:
 # ==========================================
 # 5. INTERFAZ: PANEL CENTRAL
 # ==========================================
-st.title("Gestión del Servicio de Cirugía General (v3.0)")
+st.title("Gestión del Servicio de Cirugía General (v4.0)")
 
 tab1, tab2, tab3 = st.tabs(["🏥 A: Gestor de Quirófanos", "📊 B: Matriz General", "📋 Resumen y Disponibilidad"])
 
