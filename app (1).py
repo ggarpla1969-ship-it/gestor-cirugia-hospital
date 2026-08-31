@@ -96,7 +96,7 @@ def style_matrix(df):
     return styles
 
 def process_guardias_ods(uploaded_file, matrix_df):
-    """Procesa el archivo ODS/XLSX/CSV con informe detallado de cada fila"""
+    """Procesa el archivo ODS/XLSX/CSV con informe detallado y visualización de datos crudos"""
     file_name = uploaded_file.name.lower()
     if file_name.endswith('.ods'):
         df_g = pd.read_excel(uploaded_file, engine='odf')
@@ -110,8 +110,14 @@ def process_guardias_ods(uploaded_file, matrix_df):
     if df_g.shape[1] < 3:
         raise ValueError("El archivo debe incluir al menos 3 columnas: Fecha, Cirujano 1 y Cirujano 2")
 
+    # Extraer las 3 primeras columnas y renombrarlas
     df_g = df_g.iloc[:, :3]
     df_g.columns = ['Fecha_Raw', 'Cirujano_1', 'Cirujano_2']
+
+    # --- LÍNEA DE DEPURACIÓN AÑADIDA PARA VER QUÉ LEE EXACTAMENTE ---
+    st.write("🔍 **Datos crudos leídos del archivo (Primeras 15 filas):**")
+    st.dataframe(df_g.head(15))
+    # ---------------------------------------------------------------
 
     index_map = {}
     for idx in matrix_df.index:
@@ -136,9 +142,11 @@ def process_guardias_ods(uploaded_file, matrix_df):
 
         parsed_date_str = None
         try:
+            # Intento 1: Parseo de fecha estándar pandas
             date_dt = pd.to_datetime(raw_date, dayfirst=True)
             parsed_date_str = date_dt.strftime('%d/%m/%Y')
         except:
+            # Intento 2: Búsqueda manual de patrón fecha dd/mm/yyyy
             match = re.search(r'\d{1,2}/\d{1,2}/\d{4}', raw_date)
             if match:
                 parts = match.group(0).split('/')
@@ -162,14 +170,14 @@ def process_guardias_ods(uploaded_file, matrix_df):
                     actualizados += 1
                     asignados_en_fila.append(col_real)
                 else:
-                    informe_proceso.append(f"⚠️ Fila {fila_num + 1} ({parsed_date_str}): Código de médico '{c_raw}' no reconocido en la plantilla.")
+                    informe_proceso.append(f"⚠️ Fila {fila_num + 2} ({parsed_date_str}): Código de médico '{c_raw}' no reconocido en la plantilla.")
             
             if asignados_en_fila:
-                informe_proceso.append(f"✅ Fila {fila_num + 1} ({parsed_date_str}): Guardias aplicadas a {', '.join(asignados_en_fila)}")
+                informe_proceso.append(f"✅ Fila {fila_num + 2} ({parsed_date_str}): Guardias aplicadas a {', '.join(asignados_en_fila)}")
             else:
-                informe_proceso.append(f"ℹ️ Fila {fila_num + 1} ({parsed_date_str}): Fecha válida, pero sin cirujanos especificados en las columnas 2 y 3.")
+                informe_proceso.append(f"ℹ️ Fila {fila_num + 2} ({parsed_date_str}): Fecha válida, pero sin cirujanos especificados en las columnas 2 y 3.")
         else:
-            informe_proceso.append(f"❌ Fila {fila_num + 1}: Fecha '{raw_date}' no coincide con el mes cargado en la matriz.")
+            informe_proceso.append(f"❌ Fila {fila_num + 2}: Fecha '{raw_date}' no procesada (no coincide con el mes cargado en la matriz o formato incorrecto).")
 
     matrix_df = apply_guardia_rules(matrix_df)
 
@@ -245,7 +253,7 @@ with st.sidebar:
                 st.session_state.matrix_df, count = process_guardias_ods(uploaded_guardias, st.session_state.matrix_df)
                 st.session_state.update_counter += 1
                 st.success(f"✅ ¡Importación finalizada! ({count} asignaciones procesadas)")
-                st.rerun()
+                # No hacemos rerun() de inmediato para que dé tiempo a leer el diagnóstico en pantalla.
             except Exception as e:
                 st.error(f"Error al procesar el archivo de guardias: {e}")
 
@@ -289,7 +297,7 @@ with st.sidebar:
 # ==========================================
 # 5. INTERFAZ: PANEL CENTRAL
 # ==========================================
-st.title("Gestión del Servicio de Cirugía General (v2.7)")
+st.title("Gestión del Servicio de Cirugía General (v2.8)")
 
 tab1, tab2, tab3 = st.tabs(["🏥 A: Gestor de Quirófanos", "📊 B: Matriz General", "📋 Resumen y Disponibilidad"])
 
