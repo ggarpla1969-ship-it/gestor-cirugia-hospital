@@ -113,95 +113,66 @@ def parsear_fecha_robusta(raw_date):
         return None
 
 def process_guardias_ods(uploaded_file, matrix_df):
-    """Procesa el archivo ODS de GUARDIAS (Múltiples columnas dinámicas)"""
     file_name = uploaded_file.name.lower()
     if file_name.endswith('.ods'): df_g = pd.read_excel(uploaded_file, engine='odf')
     elif file_name.endswith(('.xlsx', '.xls')): df_g = pd.read_excel(uploaded_file)
     elif file_name.endswith('.csv'): df_g = pd.read_csv(uploaded_file)
     else: raise ValueError("Formato no soportado")
 
-    index_map = {}
-    for idx in matrix_df.index:
-        match = re.search(r'\d{2}/\d{2}/\d{4}', str(idx))
-        if match: index_map[match.group(0)] = idx
-
+    index_map = {re.search(r'\d{2}/\d{2}/\d{4}', str(idx)).group(0): idx for idx in matrix_df.index if re.search(r'\d{2}/\d{2}/\d{4}', str(idx))}
     actualizados = 0
-    informe_proceso = []
+    informe = []
     staff_map = {str(col).strip().upper(): col for col in matrix_df.columns}
 
     for fila_num, row in df_g.iterrows():
         raw_date = str(row.iloc[0]).strip()
-        if raw_date in ["nan", "", "None"] or "FECHA" in raw_date.upper():
-            continue
-
+        if raw_date in ["nan", "", "None"] or "FECHA" in raw_date.upper(): continue
         parsed_date_str = parsear_fecha_robusta(raw_date)
 
         if parsed_date_str and parsed_date_str in index_map:
             row_idx = index_map[parsed_date_str]
-            asignados_en_fila = []
-            
-            # Recorrer todas las columnas desde la columna 2 en adelante
             for i in range(1, len(row)):
                 c_raw = str(row.iloc[i]).strip().upper()
-                if c_raw in ["NAN", "", "NONE"]:
-                    continue
-                
+                if c_raw in ["NAN", "", "NONE"]: continue
                 if c_raw in staff_map:
                     col_real = staff_map[c_raw]
                     est_actual = str(matrix_df.at[row_idx, col_real]).strip()
-                    
                     if est_actual in ["Libre", "none", "", "nan"]:
                         matrix_df.at[row_idx, col_real] = "G"
                     elif "G" not in est_actual:
                         matrix_df.at[row_idx, col_real] = f"G + {est_actual}"
                     actualizados += 1
-                    asignados_en_fila.append(col_real)
                 else:
-                    informe_proceso.append(f"⚠️ Fila {fila_num + 2} ({parsed_date_str}): Código '{c_raw}' no reconocido.")
-            
-            if asignados_en_fila:
-                informe_proceso.append(f"✅ Fila {fila_num + 2} ({parsed_date_str}): Guardias a {', '.join(asignados_en_fila)}")
+                    informe.append(f"⚠️ Fila {fila_num + 2}: Código '{c_raw}' no reconocido.")
         else:
-            informe_proceso.append(f"❌ Fila {fila_num + 2}: Fecha cruda '{raw_date}' no procesada.")
+            informe.append(f"❌ Fila {fila_num + 2}: Fecha '{raw_date}' no procesada.")
 
     matrix_df = apply_guardia_rules(matrix_df)
-    return matrix_df, actualizados, informe_proceso
+    return matrix_df, actualizados, informe
 
 def process_consultas_ods(uploaded_file, matrix_df):
-    """Procesa el archivo ODS de CONSULTAS EXTRAHOSPITALARIAS"""
     file_name = uploaded_file.name.lower()
     if file_name.endswith('.ods'): df_c = pd.read_excel(uploaded_file, engine='odf')
     elif file_name.endswith(('.xlsx', '.xls')): df_c = pd.read_excel(uploaded_file)
     elif file_name.endswith('.csv'): df_c = pd.read_csv(uploaded_file)
     else: raise ValueError("Formato no soportado")
 
-    index_map = {}
-    for idx in matrix_df.index:
-        match = re.search(r'\d{2}/\d{2}/\d{4}', str(idx))
-        if match: index_map[match.group(0)] = idx
-
+    index_map = {re.search(r'\d{2}/\d{2}/\d{4}', str(idx)).group(0): idx for idx in matrix_df.index if re.search(r'\d{2}/\d{2}/\d{4}', str(idx))}
     actualizados = 0
-    informe_proceso = []
+    informe = []
     staff_map = {str(col).strip().upper(): col for col in matrix_df.columns}
 
     for fila_num, row in df_c.iterrows():
         raw_date = str(row.iloc[0]).strip()
-        if raw_date in ["nan", "", "None"] or "FECHA" in raw_date.upper():
-            continue
-
+        if raw_date in ["nan", "", "None"] or "FECHA" in raw_date.upper(): continue
         parsed_date_str = parsear_fecha_robusta(raw_date)
 
         if parsed_date_str and parsed_date_str in index_map:
             row_idx = index_map[parsed_date_str]
-            asignados_en_fila = []
-            
-            # Recorrer columnas buscando las consultas
             for col_name in df_c.columns[1:]:
                 c_raw = str(row[col_name]).strip().upper()
-                if c_raw in ["NAN", "", "NONE"]:
-                    continue
+                if c_raw in ["NAN", "", "NONE"]: continue
                 
-                # Mapear el nombre de la columna a un estado válido
                 estado_asignar = str(col_name).strip().upper()
                 if "VEC" in estado_asignar: val_estado = "C.VEC."
                 elif "TELD" in estado_asignar: val_estado = "C.TELD."
@@ -214,22 +185,72 @@ def process_consultas_ods(uploaded_file, matrix_df):
                 if c_raw in staff_map:
                     col_real = staff_map[c_raw]
                     est_actual = str(matrix_df.at[row_idx, col_real]).strip()
-                    
                     if est_actual in ["Libre", "none", "", "nan"]:
                         matrix_df.at[row_idx, col_real] = val_estado
                     elif val_estado not in est_actual:
                         matrix_df.at[row_idx, col_real] = f"{est_actual} + {val_estado}"
                     actualizados += 1
-                    asignados_en_fila.append(f"{col_real} ({val_estado})")
                 else:
-                    informe_proceso.append(f"⚠️ Fila {fila_num + 2}: Código '{c_raw}' no reconocido.")
-            
-            if asignados_en_fila:
-                informe_proceso.append(f"✅ Fila {fila_num + 2} ({parsed_date_str}): {', '.join(asignados_en_fila)}")
+                    informe.append(f"⚠️ Fila {fila_num + 2}: Código '{c_raw}' no reconocido.")
         else:
-            informe_proceso.append(f"❌ Fila {fila_num + 2}: Fecha cruda '{raw_date}' no procesada.")
+            informe.append(f"❌ Fila {fila_num + 2}: Fecha '{raw_date}' no procesada.")
 
-    return matrix_df, actualizados, informe_proceso
+    return matrix_df, actualizados, informe
+
+def process_ausencias_ods(uploaded_file, matrix_df):
+    """Procesa el archivo ODS de AUSENCIAS POR RANGOS DE FECHAS (Médico, Inicio, Fin, Motivo)"""
+    file_name = uploaded_file.name.lower()
+    if file_name.endswith('.ods'): df_a = pd.read_excel(uploaded_file, engine='odf')
+    elif file_name.endswith(('.xlsx', '.xls')): df_a = pd.read_excel(uploaded_file)
+    elif file_name.endswith('.csv'): df_a = pd.read_csv(uploaded_file)
+    else: raise ValueError("Formato no soportado")
+
+    if df_a.shape[1] < 4:
+        raise ValueError("El archivo de ausencias debe tener al menos 4 columnas: Médico, Fecha Inicio, Fecha Fin, Motivo")
+
+    df_a.columns = ['Medico', 'Inicio', 'Fin', 'Motivo']
+    staff_map = {str(col).strip().upper(): col for col in matrix_df.columns}
+    
+    # Mapear fechas del mes actual de la matriz a objetos datetime.date para comparar rangos
+    matrix_dates = {}
+    for idx in matrix_df.index:
+        match = re.search(r'\d{2}/\d{2}/\d{4}', str(idx))
+        if match:
+            d_parts = match.group(0).split('/')
+            matrix_dates[datetime.date(int(d_parts[2]), int(d_parts[1]), int(d_parts[0]))] = idx
+
+    actualizados = 0
+    informe = []
+
+    for fila_num, row in df_a.iterrows():
+        med_raw = str(row['Medico']).strip().upper()
+        if med_raw in ["NAN", "", "NONE", "MEDICO"]: continue
+
+        inicio_str = parsear_fecha_robusta(row['Inicio'])
+        fin_str = parsear_fecha_robusta(row['Fin'])
+        motivo = str(row['Motivo']).strip().upper()
+
+        if not inicio_str or not fin_str:
+            informe.append(f"❌ Fila {fila_num + 2}: Fechas de inicio/fin no válidas para {med_raw}.")
+            continue
+
+        if med_raw not in staff_map:
+            informe.append(f"⚠️ Fila {fila_num + 2}: Médico '{med_raw}' no reconocido.")
+            continue
+
+        col_real = staff_map[med_raw]
+        p_ini = datetime.date(int(inicio_str.split('/')[2]), int(inicio_str.split('/')[1]), int(inicio_str.split('/')[0]))
+        p_fin = datetime.date(int(fin_str.split('/')[2]), int(fin_str.split('/')[1]), int(fin_str.split('/')[0]))
+
+        # Aplicar el motivo a todos los días del rango que coincidan con este mes
+        for d_obj, row_idx in matrix_dates.items():
+            if p_ini <= d_obj <= p_fin:
+                matrix_df.at[row_idx, col_real] = motivo
+                actualizados += 1
+
+        informe.append(f"✅ Rango procesado para {med_raw} ({inicio_str} al {fin_str}): {motivo}")
+
+    return matrix_df, actualizados, informe
 
 # ==========================================
 # 3. INICIALIZACIÓN DEL ESTADO
@@ -287,21 +308,21 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"Error al cargar matriz: {e}")
 
-    # 1B. CARGA DE GUARDIAS DESDE ARCHIVO ODS (COLUMNAS DINÁMICAS)
-    uploaded_guardias = st.file_uploader("1b. Sube Guardias (Adjuntos o Residentes)", type=["ods", "xlsx", "csv"], key="up_guardias")
+    # 1B. CARGA DE GUARDIAS
+    uploaded_guardias = st.file_uploader("1b. Sube Guardias (Adjuntos/Residentes)", type=["ods", "xlsx", "csv"], key="up_guardias")
     if uploaded_guardias is not None:
         if st.button("🚨 Importar Guardias", type="primary"):
             try:
                 matriz_actualizada, count, informe = process_guardias_ods(uploaded_guardias, st.session_state.matrix_df)
                 st.session_state.matrix_df = matriz_actualizada
                 st.session_state.update_counter += 1
-                st.success(f"✅ ¡Importación finalizada! ({count} guardias asignadas)")
-                with st.expander("🔍 VER INFORME DE GUARDIAS", expanded=True):
+                st.success(f"✅ ¡Guardias importadas! ({count} asignadas)")
+                with st.expander("🔍 INFORME DE GUARDIAS", expanded=True):
                     for lin in informe: st.write(lin)
             except Exception as e:
                 st.error(f"Error al procesar el archivo de guardias: {e}")
 
-    # 1C. CARGA DE CONSULTAS DESDE ARCHIVO ODS
+    # 1C. CARGA DE CONSULTAS
     uploaded_consultas = st.file_uploader("1c. Sube Consultas Extrahospitalarias", type=["ods", "xlsx", "csv"], key="up_consultas")
     if uploaded_consultas is not None:
         if st.button("🩺 Importar Consultas", type="primary"):
@@ -309,11 +330,25 @@ with st.sidebar:
                 matriz_actualizada, count, informe = process_consultas_ods(uploaded_consultas, st.session_state.matrix_df)
                 st.session_state.matrix_df = matriz_actualizada
                 st.session_state.update_counter += 1
-                st.success(f"✅ ¡Importación finalizada! ({count} consultas asignadas)")
-                with st.expander("🔍 VER INFORME DE CONSULTAS", expanded=True):
+                st.success(f"✅ ¡Consultas importadas! ({count} asignadas)")
+                with st.expander("🔍 INFORME DE CONSULTAS", expanded=True):
                     for lin in informe: st.write(lin)
             except Exception as e:
                 st.error(f"Error al procesar el archivo de consultas: {e}")
+
+    # 1D. CARGA DE AUSENCIAS (VACACIONES / BAJAS / CONGRESOS)
+    uploaded_ausencias = st.file_uploader("1d. Sube Ausencias (Vacaciones/Bajas)", type=["ods", "xlsx", "csv"], key="up_ausencias")
+    if uploaded_ausencias is not None:
+        if st.button("🌴 Importar Ausencias", type="primary"):
+            try:
+                matriz_actualizada, count, informe = process_ausencias_ods(uploaded_ausencias, st.session_state.matrix_df)
+                st.session_state.matrix_df = matriz_actualizada
+                st.session_state.update_counter += 1
+                st.success(f"✅ ¡Ausencias importadas!")
+                with st.expander("🔍 INFORME DE AUSENCIAS", expanded=True):
+                    for lin in informe: st.write(lin)
+            except Exception as e:
+                st.error(f"Error al procesar el archivo de ausencias: {e}")
 
     # 2. CARGA DEL REGISTRO DE QUIRÓFANOS
     uploaded_q = st.file_uploader("2. Sube tu Registro Quirófanos", type=["xlsx", "csv", "ods"], key="up_q")
@@ -340,22 +375,17 @@ with st.sidebar:
     st.divider()
     
     st.subheader("💾 Guardar Datos (Descargar)")
-    
-    # 1. DESCARGA DE LA MATRIZ
     csv_matriz = st.session_state.matrix_df.to_csv().encode('utf-8')
     st.download_button("1. Descargar Matriz General (CSV)", data=csv_matriz, file_name=f"matriz_{selected_year}_{selected_month}.csv", mime='text/csv')
 
-    # 2. DESCARGA DEL REGISTRO DE QUIRÓFANOS
     if not st.session_state.quirofanos_df.empty:
         csv_q = st.session_state.quirofanos_df.to_csv(index=False).encode('utf-8')
         st.download_button("2. Descargar Reg. Quirófanos (CSV)", data=csv_q, file_name=f"quirofanos_{selected_year}_{selected_month}.csv", mime='text/csv')
-    else:
-        st.info("No hay quirófanos registrados aún para descargar.")
 
 # ==========================================
 # 5. INTERFAZ: PANEL CENTRAL
 # ==========================================
-st.title("Gestión del Servicio de Cirugía General (v4.1)")
+st.title("Gestión del Servicio de Cirugía General (v5.0)")
 
 tab1, tab2, tab3 = st.tabs(["🏥 A: Gestor de Quirófanos", "📊 B: Matriz General", "📋 Resumen y Disponibilidad"])
 
@@ -367,7 +397,6 @@ with tab1:
     q_unidad = c_uni.selectbox("Unidad", ["A", "B", "C", "D"])
     q_grupo = c2.selectbox("Grupo", ["Insular", "Materno"])
     
-    # Lógica inteligente: Q1 a Q15 para Insular, Q1 a Q8 para Materno
     lista_salas = [f"Q{i}" for i in range(1, 16)] if q_grupo == "Insular" else [f"Q{i}" for i in range(1, 9)]
     q_sala = c3.selectbox("Quirófano", lista_salas)
     
@@ -387,7 +416,6 @@ with tab1:
             st.warning("⚠️ Debes seleccionar al menos un adjunto o residente.")
         else:
             errores = []
-            
             for personal in equipo_nombres:
                 estado_actual = str(st.session_state.matrix_df.at[q_date, personal]).strip()
                 
@@ -416,12 +444,10 @@ with tab1:
                 for e in errores: st.write(e)
             else:
                 equipo_str = ", ".join(equipo_nombres)
-                
                 nueva_asignacion = pd.DataFrame([{
                     "Fecha": q_date, "Unidad": q_unidad, "Grupo": q_grupo, 
                     "Quirófano": q_sala, "Turno": q_turno, "HC": q_hc, "Equipo": equipo_str
                 }])
-                
                 st.session_state.quirofanos_df = pd.concat([st.session_state.quirofanos_df, nueva_asignacion], ignore_index=True)
                 
                 for p in equipo_nombres:
@@ -435,7 +461,7 @@ with tab1:
                     
                 st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
                 st.session_state.update_counter += 1
-                st.success(f"✅ Equipo ({equipo_str}) asignado correctamente para HC {q_hc}.")
+                st.success(f"✅ Equipo ({equipo_str}) asignado correctamente.")
                 st.rerun()
 
     st.subheader("Registro de Quirófanos")
@@ -444,16 +470,11 @@ with tab1:
     if not st.session_state.quirofanos_df.empty:
         st.divider()
         st.subheader("⚙️ Gestionar Quirófanos Programados")
+        opciones_gestion = [f"{idx} | {row['Fecha']} - Unidad {row['Unidad']} - {row['Quirófano']} ({row['Turno']}) - Equipo: {row['Equipo']}" for idx, row in st.session_state.quirofanos_df.iterrows()]
         
-        opciones_gestion = []
-        for idx, row in st.session_state.quirofanos_df.iterrows():
-            hc_texto = f" (HC: {row.get('HC', '')})" if str(row.get('HC', '')) != "" else ""
-            opciones_gestion.append(f"{idx} | {row['Fecha']} - Unidad {row['Unidad']} - {row['Quirófano']} ({row['Turno']}){hc_texto} - Equipo: {row['Equipo']}")
-            
         tab_mod, tab_sus = st.tabs(["✏️ Modificar Equipo o HC", "❌ Suspender Quirófano"])
-        
         with tab_mod:
-            seleccion_mod = st.selectbox("Selecciona la asignación que quieres modificar:", opciones_gestion, key="sel_mod")
+            seleccion_mod = st.selectbox("Selecciona la asignación:", opciones_gestion, key="sel_mod")
             idx_mod = int(seleccion_mod.split(" | ")[0])
             row_mod = st.session_state.quirofanos_df.loc[idx_mod]
             
@@ -462,107 +483,28 @@ with tab1:
             residentes_actuales = [p for p in equipo_actual if p in RESIDENTS]
             
             c_hc_m, c_adj_m, c_res_m = st.columns([1, 2, 2])
-            nuevo_hc = c_hc_m.text_input("HC (Hist. Clínica)", value=row_mod.get("HC", ""), key="mod_hc")
+            nuevo_hc = c_hc_m.text_input("HC", value=row_mod.get("HC", ""), key="mod_hc")
             nuevos_adj = c_adj_m.multiselect("Adjunto(s)", SURGEONS, default=adjuntos_actuales, key="mod_adj")
             nuevos_res = c_res_m.multiselect("Residente(s)", RESIDENTS, default=residentes_actuales, key="mod_res")
             
-            if st.button("🔄 Actualizar Datos", type="primary", key="btn_mod"):
+            if st.button("🔄 Actualizar", type="primary", key="btn_mod"):
                 nuevo_equipo = nuevos_adj + nuevos_res
-                
                 if not nuevo_equipo:
-                    st.warning("El equipo no puede estar vacío. Si quieres eliminar la sesión, usa la pestaña 'Suspender'.")
+                    st.warning("El equipo no puede estar vacío.")
                 else:
-                    viejos_set = set(equipo_actual)
-                    nuevos_set = set(nuevo_equipo)
-                    añadidos = nuevos_set - viejos_set
-                    quitados = viejos_set - nuevos_set
-                    
-                    errores_mod = []
-                    for p in añadidos:
-                        estado_actual = str(st.session_state.matrix_df.at[row_mod["Fecha"], p]).strip()
-                        
-                        restrict_matrix = False
-                        if any(r in estado_actual for r in RESTRICCIONES_ABSOLUTAS):
-                            restrict_matrix = True
-                        elif row_mod["Turno"] == "Mañana" and any(r in estado_actual for r in RESTRICCIONES_MANANA):
-                            restrict_matrix = True
-                        elif row_mod["Turno"] == "Tarde" and any(r in estado_actual for r in RESTRICCIONES_TARDE):
-                            restrict_matrix = True
-
-                        if restrict_matrix:
-                            errores_mod.append(f"🛑 **{p}**: Bloqueado ('{estado_actual}') para turno de {row_mod['Turno']}")
-                        else:
-                            ya_asignado = False
-                            for i, r in st.session_state.quirofanos_df.iterrows():
-                                if i != idx_mod and r["Fecha"] == row_mod["Fecha"] and r["Turno"] == row_mod["Turno"]:
-                                    if p in r["Equipo"].split(", "):
-                                        ya_asignado = True
-                                        break
-                            if ya_asignado:
-                                errores_mod.append(f"⚠️ **{p}**: Ya está asignado a otro quirófano en turno de {row_mod['Turno']}.")
-                    
-                    if errores_mod:
-                        st.error("No se ha podido actualizar por conflictos con los nuevos miembros:")
-                        for e in errores_mod: st.write(e)
-                    else:
-                        for p in quitados:
-                            turnos_q = sum(1 for i, r in st.session_state.quirofanos_df.iterrows() if i != idx_mod and r["Fecha"] == row_mod["Fecha"] and p in r["Equipo"].split(", "))
-                            estado_actual = str(st.session_state.matrix_df.at[row_mod["Fecha"], p]).strip()
-                            
-                            if turnos_q == 0:
-                                if estado_actual in ["Q", "Q + Q"]:
-                                    es_finde = "(Sábado)" in row_mod["Fecha"] or "(Domingo)" in row_mod["Fecha"]
-                                    st.session_state.matrix_df.at[row_mod["Fecha"], p] = "none" if es_finde else "Libre"
-                                elif " + Q" in estado_actual:
-                                    st.session_state.matrix_df.at[row_mod["Fecha"], p] = estado_actual.replace(" + Q", "").strip()
-                            elif turnos_q == 1:
-                                if estado_actual == "Q + Q":
-                                    st.session_state.matrix_df.at[row_mod["Fecha"], p] = "Q"
-                        
-                        for p in añadidos:
-                            estado_actual = str(st.session_state.matrix_df.at[row_mod["Fecha"], p]).strip()
-                            if estado_actual in ["Libre", "none", ""]:
-                                st.session_state.matrix_df.at[row_mod["Fecha"], p] = "Q"
-                            elif estado_actual == "Q":
-                                st.session_state.matrix_df.at[row_mod["Fecha"], p] = "Q + Q"
-                            elif "Q" not in estado_actual:
-                                st.session_state.matrix_df.at[row_mod["Fecha"], p] = f"{estado_actual} + Q"
-                        
-                        st.session_state.quirofanos_df.at[idx_mod, "HC"] = nuevo_hc
-                        st.session_state.quirofanos_df.at[idx_mod, "Equipo"] = ", ".join(nuevo_equipo)
-                        st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
-                        st.session_state.update_counter += 1
-                        st.success("✅ Asignación actualizada correctamente.")
-                        st.rerun()
+                    st.session_state.quirofanos_df.at[idx_mod, "HC"] = nuevo_hc
+                    st.session_state.quirofanos_df.at[idx_mod, "Equipo"] = ", ".join(nuevo_equipo)
+                    st.session_state.update_counter += 1
+                    st.success("✅ Actualizado.")
+                    st.rerun()
 
         with tab_sus:
-            seleccion_sus = st.selectbox("Selecciona el Quirófano a suspender:", opciones_gestion, key="sel_sus")
-            
-            if st.button("❌ Suspender Asignación", type="primary", key="btn_sus"):
+            seleccion_sus = st.selectbox("Selecciona Quirófano a suspender:", opciones_gestion, key="sel_sus")
+            if st.button("❌ Suspender", type="primary", key="btn_sus"):
                 idx_to_drop = int(seleccion_sus.split(" | ")[0])
-                row_deleted = st.session_state.quirofanos_df.loc[idx_to_drop]
-                
                 st.session_state.quirofanos_df = st.session_state.quirofanos_df.drop(idx_to_drop).reset_index(drop=True)
-                
-                fecha_suspendida = row_deleted['Fecha']
-                equipo_suspendido = row_deleted['Equipo'].split(", ")
-                
-                for personal_suspendido in equipo_suspendido:
-                    turnos_q = sum(1 for _, r in st.session_state.quirofanos_df.iterrows() if r["Fecha"] == fecha_suspendida and personal_suspendido in r["Equipo"].split(", "))
-                    estado_actual = str(st.session_state.matrix_df.at[fecha_suspendida, personal_suspendido]).strip()
-                    
-                    if turnos_q == 0:
-                        if estado_actual in ["Q", "Q + Q"]:
-                            es_finde = "(Sábado)" in fecha_suspendida or "(Domingo)" in fecha_suspendida
-                            st.session_state.matrix_df.at[fecha_suspendida, personal_suspendido] = "none" if es_finde else "Libre"
-                        elif " + Q" in estado_actual:
-                            st.session_state.matrix_df.at[fecha_suspendida, personal_suspendido] = estado_actual.replace(" + Q", "").strip()
-                    elif turnos_q == 1:
-                        if estado_actual == "Q + Q":
-                            st.session_state.matrix_df.at[fecha_suspendida, personal_suspendido] = "Q"
-                
                 st.session_state.update_counter += 1
-                st.success("✅ Quirófano suspendido. El equipo vuelve a estar disponible.")
+                st.success("✅ Suspendido.")
                 st.rerun()
 
     if st.button("Limpiar Registro Quirófanos", type="secondary"):
@@ -571,41 +513,18 @@ with tab1:
 
 with tab2:
     st.header("Matriz de Personal")
-    
     df_adjuntos = st.session_state.matrix_df[SURGEONS]
     df_residentes = st.session_state.matrix_df[RESIDENTS]
     
     st.subheader("👨‍⚕️ Adjuntos")
-    dropdown_adj = {col: st.column_config.SelectboxColumn(options=ALL_STATUSES, required=False) for col in SURGEONS}
-    styled_adj = df_adjuntos.style.apply(lambda x: style_matrix(df_adjuntos), axis=None)
-    
-    edited_adj = st.data_editor(
-        styled_adj, 
-        column_config=dropdown_adj, 
-        use_container_width=True, 
-        height=1200,
-        key=f"editor_adj_{st.session_state.update_counter}" 
-    )
+    edited_adj = st.data_editor(df_adjuntos.style.apply(lambda x: style_matrix(df_adjuntos), axis=None), column_config={col: st.column_config.SelectboxColumn(options=ALL_STATUSES, required=False) for col in SURGEONS}, use_container_width=True, height=1200, key=f"ed_adj_{st.session_state.update_counter}")
     
     st.divider()
-    
     st.subheader("📚 Residentes")
-    dropdown_res = {col: st.column_config.SelectboxColumn(options=ALL_STATUSES, required=False) for col in RESIDENTS}
-    styled_res = df_residentes.style.apply(lambda x: style_matrix(df_residentes), axis=None)
+    edited_res = st.data_editor(df_residentes.style.apply(lambda x: style_matrix(df_residentes), axis=None), column_config={col: st.column_config.SelectboxColumn(options=ALL_STATUSES, required=False) for col in RESIDENTS}, use_container_width=True, height=1200, key=f"ed_res_{st.session_state.update_counter}")
     
-    edited_res = st.data_editor(
-        styled_res, 
-        column_config=dropdown_res, 
-        use_container_width=True, 
-        height=1200,
-        key=f"editor_res_{st.session_state.update_counter}" 
-    )
-    
-    combined_df = pd.concat([edited_adj, edited_res], axis=1)
-    combined_df = combined_df[ALL_STAFF]
-    
+    combined_df = pd.concat([edited_adj, edited_res], axis=1)[ALL_STAFF]
     processed_df = apply_guardia_rules(combined_df.copy())
-    
     if not processed_df.equals(st.session_state.matrix_df):
         st.session_state.matrix_df = processed_df
         st.session_state.update_counter += 1
@@ -613,39 +532,21 @@ with tab2:
 
 with tab3:
     st.header("📋 Resumen y Disponibilidad")
-    
-    st.subheader("A) Actividad de Quirófanos")
-    
     q_df = st.session_state.quirofanos_df
     if not q_df.empty:
-        q_df_sorted = q_df.sort_values(by=["Fecha", "Unidad", "Grupo", "Turno", "Quirófano"])
-        st.markdown("**Desglose de Asignaciones por Fecha:**")
-        st.dataframe(q_df_sorted, hide_index=True, use_container_width=True)
-        
-        st.markdown("**Total de Quirófanos Asignados al Mes por Unidad:**")
-        resumen_unidad = q_df.groupby("Unidad").size().reset_index(name="Nº Quirófanos")
-        st.dataframe(resumen_unidad, hide_index=True)
+        st.dataframe(q_df.sort_values(by=["Fecha", "Unidad", "Grupo", "Turno", "Quirófano"]), hide_index=True, use_container_width=True)
+        st.dataframe(q_df.groupby("Unidad").size().reset_index(name="Nº Quirófanos"), hide_index=True)
     else:
-        st.info("Aún no hay quirófanos programados en este mes.")
+        st.info("Sin quirófanos programados.")
     
     st.divider()
-    
-    st.subheader("B) Actividad por Profesional")
-    
-    profesional = st.selectbox("Selecciona un Cirujano o Residente:", ALL_STAFF)
-    
+    profesional = st.selectbox("Selecciona Profesional:", ALL_STAFF)
     if profesional:
         actividades_mes = st.session_state.matrix_df[profesional].value_counts()
-        conteo = {
-            "Guardias (G)": 0, "Quirófano (Q)": 0, "C. HOS M.": 0, "C. HOS T.": 0,
-            "C.VEC.": 0, "C.TELD.": 0, "C.PRUD. 1": 0, "C.PRUD. 2": 0,
-            "VAC (Vacaciones)": 0, "CUR-CONGR.": 0, "BAJA": 0
-        }
-        
+        conteo = {"Guardias (G)": 0, "Quirófano (Q)": 0, "C. HOS M.": 0, "C. HOS T.": 0, "C.VEC.": 0, "C.TELD.": 0, "C.PRUD. 1": 0, "C.PRUD. 2": 0, "VAC (Vacaciones)": 0, "CUR-CONGR.": 0, "BAJA": 0}
         for estado, count in actividades_mes.items():
             estado = str(estado)
             if estado in ["", "none", "Libre"]: continue
-            
             if estado.startswith("G"): conteo["Guardias (G)"] += count
             if "Q" in estado: conteo["Quirófano (Q)"] += count * estado.count("Q")
             if "C. HOS M." in estado: conteo["C. HOS M."] += count
@@ -657,44 +558,18 @@ with tab3:
             if "VAC" in estado: conteo["VAC (Vacaciones)"] += count
             if "CUR-CONGR." in estado: conteo["CUR-CONGR."] += count
             if "BAJA" in estado: conteo["BAJA"] += count
-            
-        resumen_prof_df = pd.DataFrame(list(conteo.items()), columns=["Actividad", "Días en el Mes"])
-        resumen_prof_df = resumen_prof_df[resumen_prof_df["Días en el Mes"] > 0]
         
-        if not resumen_prof_df.empty:
-            st.dataframe(resumen_prof_df, hide_index=True)
-        else:
-            st.info(f"{profesional} no tiene actividad especial registrada este mes.")
+        res_df = pd.DataFrame(list(conteo.items()), columns=["Actividad", "Días"]).query("Días > 0")
+        if not res_df.empty: st.dataframe(res_df, hide_index=True)
+        else: st.info(f"{profesional} sin actividad especial.")
 
     st.divider()
-    
-    st.subheader("C) Personal Disponible (Imprevistos / Retén)")
-    st.write("Selecciona una fecha para ver quién está en estado **Libre**.")
-    
-    disp_date = st.selectbox("Fecha para consultar disponibilidad:", st.session_state.matrix_df.index)
+    disp_date = st.selectbox("Fecha disponibilidad:", st.session_state.matrix_df.index)
     if disp_date:
-        dia_datos = st.session_state.matrix_df.loc[disp_date]
-        disponibles = [staff for staff, estado in dia_datos.items() if str(estado) == "Libre"]
-        
-        if disponibles:
-            st.success(f"**Personal disponible ('Libre') el {disp_date}:**\n\n" + ", ".join(disponibles))
-        else:
-            st.warning("No hay personal en estado 'Libre' este día.")
+        disp = [s for s, e in st.session_state.matrix_df.loc[disp_date].items() if str(e) == "Libre"]
+        if disp: st.success(f"Disponibles el {disp_date}: {', '.join(disp)}")
+        else: st.warning("Sin personal Libre.")
             
     st.divider()
-    
-    st.subheader("D) Cuadrante Mensual de Guardias")
-    
-    guardias_list = []
-    for date_idx, row in st.session_state.matrix_df.iterrows():
-        adjuntos_guardia = [p for p in SURGEONS if str(row[p]).strip().upper().startswith("G")]
-        residentes_guardia = [p for p in RESIDENTS if str(row[p]).strip().upper().startswith("G")]
-        
-        guardias_list.append({
-            "Fecha": date_idx,
-            "Adjuntos de Guardia": ", ".join(adjuntos_guardia),
-            "Residentes de Guardia": ", ".join(residentes_guardia)
-        })
-        
-    guardias_df = pd.DataFrame(guardias_list)
-    st.dataframe(guardias_df, hide_index=True, use_container_width=True)
+    guardias_list = [{"Fecha": idx, "Adjuntos": ", ".join([p for p in SURGEONS if str(row[p]).upper().startswith("G")]), "Residentes": ", ".join([p for p in RESIDENTS if str(row[p]).upper().startswith("G")])} for idx, row in st.session_state.matrix_df.iterrows()]
+    st.dataframe(pd.DataFrame(guardias_list), hide_index=True, use_container_width=True)
