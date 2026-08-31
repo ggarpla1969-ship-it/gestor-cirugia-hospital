@@ -96,7 +96,7 @@ def style_matrix(df):
     return styles
 
 def process_guardias_ods(uploaded_file, matrix_df):
-    """Procesa el archivo ODS con parseo avanzado de fechas"""
+    """Procesa el archivo ODS con sistema de parseo de fechas a prueba de fallos"""
     file_name = uploaded_file.name.lower()
     if file_name.endswith('.ods'):
         df_g = pd.read_excel(uploaded_file, engine='odf')
@@ -112,10 +112,6 @@ def process_guardias_ods(uploaded_file, matrix_df):
 
     df_g = df_g.iloc[:, :3]
     df_g.columns = ['Fecha_Raw', 'Cirujano_1', 'Cirujano_2']
-
-    # --- LÍNEA DE DEPURACIÓN (la mantenemos por seguridad) ---
-    st.write("🔍 **Datos crudos leídos del archivo:**")
-    st.dataframe(df_g.head(5))
 
     index_map = {}
     for idx in matrix_df.index:
@@ -140,20 +136,22 @@ def process_guardias_ods(uploaded_file, matrix_df):
         parsed_date_str = None
         
         # --- NUEVA LÓGICA TODOTERRENO PARA PARSEAR FECHAS ---
-        try:
-            # Si pandas logra convertirlo en objeto DateTime directamente
-            date_obj = pd.to_datetime(raw_date, dayfirst=True)
-            parsed_date_str = date_obj.strftime('%d/%m/%Y')
-        except:
-            # 1. Buscar patrón YYYY-MM-DD HH:MM:SS (el que fallaba)
-            match_iso = re.search(r'(\d{4})-(\d{2})-(\d{2})', raw_date)
-            if match_iso:
-                parsed_date_str = f"{match_iso.group(3)}/{match_iso.group(2)}/{match_iso.group(1)}"
+        # 1. Detectar patrón ISO primero (2026-09-01)
+        match_iso = re.search(r'^(\d{4})-(\d{2})-(\d{2})', raw_date)
+        if match_iso:
+            parsed_date_str = f"{match_iso.group(3)}/{match_iso.group(2)}/{match_iso.group(1)}"
+        else:
+            # 2. Detectar patrón Europeo (01/09/2026)
+            match_eu = re.search(r'^(\d{1,2})[/-](\d{1,2})[/-](\d{4})', raw_date)
+            if match_eu:
+                parsed_date_str = f"{int(match_eu.group(1)):02d}/{int(match_eu.group(2)):02d}/{match_eu.group(3)}"
             else:
-                # 2. Buscar patrón DD/MM/YYYY
-                match_eu = re.search(r'(\d{1,2})/(\d{1,2})/(\d{4})', raw_date)
-                if match_eu:
-                    parsed_date_str = f"{int(match_eu.group(1)):02d}/{int(match_eu.group(2)):02d}/{match_eu.group(3)}"
+                # 3. Fallback a Pandas
+                try:
+                    date_obj = pd.to_datetime(raw_date, dayfirst=True)
+                    parsed_date_str = date_obj.strftime('%d/%m/%Y')
+                except:
+                    pass
 
         if parsed_date_str and parsed_date_str in index_map:
             row_idx = index_map[parsed_date_str]
@@ -298,7 +296,7 @@ with st.sidebar:
 # ==========================================
 # 5. INTERFAZ: PANEL CENTRAL
 # ==========================================
-st.title("Gestión del Servicio de Cirugía General (v2.9)")
+st.title("Gestión del Servicio de Cirugía General (v3.0)")
 
 tab1, tab2, tab3 = st.tabs(["🏥 A: Gestor de Quirófanos", "📊 B: Matriz General", "📋 Resumen y Disponibilidad"])
 
