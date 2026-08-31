@@ -604,7 +604,7 @@ with tab3:
     disp_date = st.selectbox("Fecha para consultar disponibilidad:", st.session_state.matrix_df.index)
     if disp_date:
         dia_datos = st.session_state.matrix_df.loc[disp_date]
-        disporibles = [staff for staff, estado in dia_datos.items() if str(estado) == "Libre"]
+        disponibles = [staff for staff, estado in dia_datos.items() if str(estado) == "Libre"]
         
         if disponibles:
             st.success(f"**Personal disponible ('Libre') el {disp_date}:**\n\n" + ", ".join(disponibles))
