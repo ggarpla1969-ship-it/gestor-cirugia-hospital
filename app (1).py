@@ -210,7 +210,7 @@ def process_ausencias_ods(uploaded_file, matrix_df):
     else: raise ValueError("Formato no soportado")
 
     if df_a.shape[1] < 4:
-        raise ValueError("El archivo de ausencias debe tener al menos 4 columnas: Médico, Fecha Inicio, Fecha Fin, Motivo")
+        raise ValueError("El archivo de ausencias debe tener al menos 4 columnas.")
 
     df_a.columns = ['Medico', 'Inicio', 'Fin', 'Motivo']
     staff_map = {str(col).strip().upper(): col for col in matrix_df.columns}
@@ -238,9 +238,7 @@ def process_ausencias_ods(uploaded_file, matrix_df):
         fin_str = parsear_fecha_robusta(fin_raw)
         motivo = str(mot_raw).strip().upper() if not pd.isna(mot_raw) else "VAC"
 
-        if not inicio_str or not fin_str:
-            continue
-
+        if not inicio_str or not fin_str: continue
         if med_raw not in staff_map:
             informe.append(f"⚠️ Fila {fila_num + 2}: Médico '{med_raw}' no reconocido.")
             continue
@@ -386,7 +384,7 @@ with st.sidebar:
 # ==========================================
 # 5. INTERFAZ: PANEL CENTRAL
 # ==========================================
-st.title("Gestión del Servicio de Cirugía General (v5.2)")
+st.title("Gestión del Servicio de Cirugía General (v5.3)")
 
 tab1, tab2, tab3 = st.tabs(["🏥 A: Gestor de Quirófanos", "📊 B: Matriz General", "📋 Resumen y Disponibilidad"])
 
@@ -493,19 +491,67 @@ with tab1:
                 if not nuevo_equipo:
                     st.warning("El equipo no puede estar vacío.")
                 else:
+                    viejos_set = set(equipo_actual)
+                    nuevos_set = set(nuevo_equipo)
+                    añadidos = nuevos_set - viejos_set
+                    quitados = viejos_set - nuevos_set
+                    
+                    # 1. Limpiar a los que se quitan de la matriz
+                    for p in quitados:
+                        turnos_q = sum(1 for i, r in st.session_state.quirofanos_df.iterrows() if i != idx_mod and r["Fecha"] == row_mod["Fecha"] and p in r["Equipo"].split(", "))
+                        estado_actual = str(st.session_state.matrix_df.at[row_mod["Fecha"], p]).strip()
+                        
+                        if turnos_q == 0:
+                            if estado_actual in ["Q", "Q + Q"]:
+                                es_finde = "(Sábado)" in row_mod["Fecha"] or "(Domingo)" in row_mod["Fecha"]
+                                st.session_state.matrix_df.at[row_mod["Fecha"], p] = "none" if es_finde else "Libre"
+                            elif " + Q" in estado_actual:
+                                st.session_state.matrix_df.at[row_mod["Fecha"], p] = estado_actual.replace(" + Q", "").strip()
+                        elif turnos_q == 1:
+                            if estado_actual == "Q + Q":
+                                st.session_state.matrix_df.at[row_mod["Fecha"], p] = "Q"
+
+                    # 2. Añadir la "Q" a los nuevos miembros en la matriz
+                    for p in añadidos:
+                        estado_actual = str(st.session_state.matrix_df.at[row_mod["Fecha"], p]).strip()
+                        if estado_actual in ["Libre", "none", ""]:
+                            st.session_state.matrix_df.at[row_mod["Fecha"], p] = "Q"
+                        elif estado_actual == "Q":
+                            st.session_state.matrix_df.at[row_mod["Fecha"], p] = "Q + Q"
+                        elif "Q" not in estado_actual:
+                            st.session_state.matrix_df.at[row_mod["Fecha"], p] = f"{estado_actual} + Q"
+
                     st.session_state.quirofanos_df.at[idx_mod, "HC"] = nuevo_hc
                     st.session_state.quirofanos_df.at[idx_mod, "Equipo"] = ", ".join(nuevo_equipo)
+                    st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
                     st.session_state.update_counter += 1
-                    st.success("✅ Actualizado.")
+                    st.success("✅ Asignación actualizada correctamente en el registro y en la matriz.")
                     st.rerun()
 
         with tab_sus:
             seleccion_sus = st.selectbox("Selecciona Quirófano a suspender:", opciones_gestion, key="sel_sus")
             if st.button("❌ Suspender", type="primary", key="btn_sus"):
                 idx_to_drop = int(seleccion_sus.split(" | ")[0])
+                row_deleted = st.session_state.quirofanos_df.loc[idx_to_drop]
                 st.session_state.quirofanos_df = st.session_state.quirofanos_df.drop(idx_to_drop).reset_index(drop=True)
+                
+                fecha_suspendida = row_deleted['Fecha']
+                for personal_suspendido in row_deleted['Equipo'].split(", "):
+                    turnos_q = sum(1 for _, r in st.session_state.quirofanos_df.iterrows() if r["Fecha"] == fecha_suspendida and personal_suspendido in r["Equipo"].split(", "))
+                    estado_actual = str(st.session_state.matrix_df.at[fecha_suspendida, personal_suspendido]).strip()
+                    
+                    if turnos_q == 0:
+                        if estado_actual in ["Q", "Q + Q"]:
+                            es_finde = "(Sábado)" in fecha_suspendida or "(Domingo)" in fecha_suspendida
+                            st.session_state.matrix_df.at[fecha_suspendida, personal_suspendido] = "none" if es_finde else "Libre"
+                        elif " + Q" in estado_actual:
+                            st.session_state.matrix_df.at[fecha_suspendida, personal_suspendido] = estado_actual.replace(" + Q", "").strip()
+                    elif turnos_q == 1:
+                        if estado_actual == "Q + Q":
+                            st.session_state.matrix_df.at[fecha_suspendida, personal_suspendido] = "Q"
+
                 st.session_state.update_counter += 1
-                st.success("✅ Suspendido.")
+                st.success("✅ Quirófano suspendido y matriz actualizada.")
                 st.rerun()
 
     if st.button("Limpiar Registro Quirófanos", type="secondary"):
