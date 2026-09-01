@@ -389,7 +389,7 @@ with st.sidebar:
 # ==========================================
 # 5. INTERFAZ: PANEL CENTRAL
 # ==========================================
-st.title("Gestión del Servicio de Cirugía General (v5.6)")
+st.title("Gestión del Servicio de Cirugía General (v5.7)")
 
 tab1, tab2, tab3 = st.tabs(["🏥 A: Gestor de Quirófanos", "📊 B: Matriz General", "📋 Resumen y Disponibilidad"])
 
@@ -671,33 +671,64 @@ with tab3:
     profesional = st.selectbox("Selecciona un Cirujano o Residente:", ALL_STAFF, key="sel_prof_resumen")
     
     if profesional:
-        actividades_mes = st.session_state.matrix_df[profesional].value_counts()
+        columna_prof = st.session_state.matrix_df[profesional]
         conteo = {
-            "Guardias (G)": 0, "Quirófano (Q)": 0, "C. HOS M.": 0, "C. HOS T.": 0,
-            "C.VEC.": 0, "C.TELD.": 0, "C.PRUD. 1": 0, "C.PRUD. 2": 0,
-            "VAC (Vacaciones)": 0, "CUR-CONGR.": 0, "BAJA": 0
+            "Guardias (G)": 0,
+            "Saliente de Guardia (SG)": 0,
+            "Quirófanos (Q)": 0,
+            "C. HOS M. (Hosp. Mañana)": 0,
+            "C. HOS T. (Hosp. Tarde)": 0,
+            "C.VEC. (Vespertina)": 0,
+            "C.TELD. (Telemedicina)": 0,
+            "C.PRUD. 1": 0,
+            "C.PRUD. 2": 0,
+            "VAC (Vacaciones)": 0,
+            "CUR-CONGR. (Congresos)": 0,
+            "BAJA": 0
         }
         
-        for estado, count in actividades_mes.items():
-            estado = str(estado)
-            if estado in ["", "none", "Libre"]: continue
+        for celda in columna_prof:
+            celda_str = str(celda).strip().upper()
+            if celda_str in ["", "NONE", "LIBRE", "NAN"]:
+                continue
             
-            if estado.startswith("G"): conteo["Guardias (G)"] += count
-            if "Q" in estado: conteo["Quirófano (Q)"] += count * estado.count("Q")
-            if "C. HOS M." in estado: conteo["C. HOS M."] += count
-            if "C. HOS T." in estado: conteo["C. HOS T."] += count
-            if "C.VEC." in estado: conteo["C.VEC."] += count
-            if "C.TELD." in estado: conteo["C.TELD."] += count
-            if "C.PRUD. 1" in estado: conteo["C.PRUD. 1"] += count
-            if "C.PRUD. 2" in estado: conteo["C.PRUD. 2"] += count
-            if "VAC" in estado: conteo["VAC (Vacaciones)"] += count
-            if "CUR-CONGR." in estado: conteo["CUR-CONGR."] += count
-            if "BAJA" in estado: conteo["BAJA"] += count
+            # Desglosar combinaciones (ej: "G + C. HOS M." o "C. HOS T. + Q")
+            partes = [p.strip() for p in celda_str.split("+")]
             
-        resumen_prof_df = pd.DataFrame(list(conteo.items()), columns=["Actividad", "Días en el Mes"])
-        resumen_prof_df = resumen_prof_df[resumen_prof_df["Días en el Mes"] > 0]
+            for parte in partes:
+                if parte.startswith("G"):
+                    conteo["Guardias (G)"] += 1
+                elif parte == "SG":
+                    conteo["Saliente de Guardia (SG)"] += 1
+                elif parte == "Q":
+                    conteo["Quirófanos (Q)"] += 1
+                elif parte == "C. HOS M.":
+                    conteo["C. HOS M. (Hosp. Mañana)"] += 1
+                elif parte == "C. HOS T.":
+                    conteo["C. HOS T. (Hosp. Tarde)"] += 1
+                elif parte == "C.VEC.":
+                    conteo["C.VEC. (Vespertina)"] += 1
+                elif parte == "C.TELD.":
+                    conteo["C.TELD. (Telemedicina)"] += 1
+                elif parte == "C.PRUD. 1":
+                    conteo["C.PRUD. 1"] += 1
+                elif parte == "C.PRUD. 2":
+                    conteo["C.PRUD. 2"] += 1
+                elif parte == "VAC":
+                    conteo["VAC (Vacaciones)"] += 1
+                elif parte == "CUR-CONGR.":
+                    conteo["CUR-CONGR. (Congresos)"] += 1
+                elif parte == "BAJA":
+                    conteo["BAJA"] += 1
+        
+        resumen_prof_df = pd.DataFrame(list(conteo.items()), columns=["Actividad", "Total Días / Turnos en el Mes"])
+        resumen_prof_df = resumen_prof_df[resumen_prof_df["Total Días / Turnos en el Mes"] > 0]
         
         if not resumen_prof_df.empty:
-            st.dataframe(resumen_prof_df, hide_index=True)
+            st.dataframe(resumen_prof_df, hide_index=True, use_container_width=True)
+            
+            # Mostrar métrica resumen total de actividad
+            total_actividad = resumen_prof_df["Total Días / Turnos en el Mes"].sum()
+            st.info(f"📊 **Resumen total de eventos registrados para {profesional} este mes:** {total_actividad} registros.")
         else:
-            st.info(f"{profesional} no tiene actividad especial registrada este mes.")
+            st.info(f"{profesional} sin actividad especial registrada este mes.")
