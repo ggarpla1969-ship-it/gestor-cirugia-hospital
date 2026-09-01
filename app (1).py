@@ -18,7 +18,6 @@ ALL_STAFF = SURGEONS + RESIDENTS
 STATUSES = ["Libre", "none", "Q", "G", "SG", "C. HOS M.", "C. HOS T.", "C.VEC.", 
             "C.TELD.", "C.PRUD. 1", "C.PRUD. 2", "VAC", "CUR-CONGR.", "BAJA"]
 
-# COMBINACIONES VÁLIDAS: Solo permitimos mezclar "Q" con tardes, o Guardias con mañanas/tardes.
 COMBO_Q = ["C. HOS T. + Q"]
 COMBO_G = [f"G + {s}" for s in ["C. HOS M.", "C. HOS T.", "C.VEC.", "C.TELD.", "C.PRUD. 1", "C.PRUD. 2"]]
 COMBO_G_Q = [f"G + C. HOS T. + Q"]
@@ -192,7 +191,6 @@ def process_consultas_ods(uploaded_file, matrix_df):
                     col_real = staff_map[c_raw]
                     est_actual = str(matrix_df.at[row_idx, col_real]).strip()
                     
-                    # Si ya tiene una guardia G, combinamos (G + Consulta), si no, asignamos la consulta limpia
                     if est_actual.startswith("G"):
                         if val_estado not in est_actual:
                             matrix_df.at[row_idx, col_real] = f"G + {val_estado}"
@@ -391,7 +389,7 @@ with st.sidebar:
 # ==========================================
 # 5. INTERFAZ: PANEL CENTRAL
 # ==========================================
-st.title("Gestión del Servicio de Cirugía General (v5.5)")
+st.title("Gestión del Servicio de Cirugía General (v5.6)")
 
 tab1, tab2, tab3 = st.tabs(["🏥 A: Gestor de Quirófanos", "📊 B: Matriz General", "📋 Resumen y Disponibilidad"])
 
@@ -503,7 +501,6 @@ with tab1:
                     añadidos = nuevos_set - viejos_set
                     quitados = viejos_set - nuevos_set
                     
-                    # Validar restricciones en los nuevos añadidos
                     errores_mod = []
                     for p in añadidos:
                         estado_actual = str(st.session_state.matrix_df.at[row_mod["Fecha"], p]).strip()
@@ -532,7 +529,6 @@ with tab1:
                         st.error("No se ha podido actualizar por conflictos con los nuevos miembros:")
                         for e in errores_mod: st.write(e)
                     else:
-                        # 1. Limpiar a los que se quitan de la matriz
                         for p in quitados:
                             turnos_q = sum(1 for i, r in st.session_state.quirofanos_df.iterrows() if i != idx_mod and r["Fecha"] == row_mod["Fecha"] and p in r["Equipo"].split(", "))
                             estado_actual = str(st.session_state.matrix_df.at[row_mod["Fecha"], p]).strip()
@@ -547,7 +543,6 @@ with tab1:
                                 if estado_actual == "Q + Q":
                                     st.session_state.matrix_df.at[row_mod["Fecha"], p] = "Q"
 
-                        # 2. Añadir la "Q" a los nuevos miembros en la matriz
                         for p in añadidos:
                             estado_actual = str(st.session_state.matrix_df.at[row_mod["Fecha"], p]).strip()
                             if estado_actual in ["Libre", "none", ""]:
@@ -615,21 +610,78 @@ with tab2:
 
 with tab3:
     st.header("📋 Resumen y Disponibilidad")
+    
+    # ---------------------------------------------------------
+    # A) LISTADO DE DISPONIBLE ELIGIENDO LA FECHA
+    # ---------------------------------------------------------
+    st.markdown("### **<u>A) LISTADO DE DISPONIBLE ELIGIENDO LA FECHA</u>**", unsafe_allow_html=True)
+    disp_date = st.selectbox("Selecciona la fecha para consultar disponibilidad:", st.session_state.matrix_df.index, key="sel_disp_date")
+    if disp_date:
+        dia_datos = st.session_state.matrix_df.loc[disp_date]
+        disponibles = [staff for staff, estado in dia_datos.items() if str(estado) == "Libre"]
+        
+        if disponibles:
+            st.success(f"**Personal disponible ('Libre') el {disp_date}:**\n\n" + ", ".join(disponibles))
+        else:
+            st.warning("No hay personal en estado 'Libre' este día.")
+            
+    st.divider()
+    
+    # ---------------------------------------------------------
+    # B) LISTADO DE QUIRÓFANOS POR FECHAS DEL MES
+    # ---------------------------------------------------------
+    st.markdown("### **<u>B) LISTADO DE QUIRÓFANOS POR FECHAS DEL MES</u>**", unsafe_allow_html=True)
     q_df = st.session_state.quirofanos_df
     if not q_df.empty:
-        st.dataframe(q_df.sort_values(by=["Fecha", "Unidad", "Grupo", "Turno", "Quirófano"]), hide_index=True, use_container_width=True)
-        st.dataframe(q_df.groupby("Unidad").size().reset_index(name="Nº Quirófanos"), hide_index=True)
+        q_df_sorted = q_df.sort_values(by=["Fecha", "Unidad", "Grupo", "Turno", "Quirófano"])
+        st.dataframe(q_df_sorted, hide_index=True, use_container_width=True)
+        
+        st.markdown("**Total de Quirófanos Asignados al Mes por Unidad:**")
+        resumen_unidad = q_df.groupby("Unidad").size().reset_index(name="Nº Quirófanos")
+        st.dataframe(resumen_unidad, hide_index=True)
     else:
-        st.info("Sin quirófanos programados.")
+        st.info("Aún no hay quirófanos programados en este mes.")
     
     st.divider()
-    profesional = st.selectbox("Selecciona Profesional:", ALL_STAFF)
+    
+    # ---------------------------------------------------------
+    # C) LISTADO DE GUARDIAS DE ADJUNTOS Y RESIDENTES
+    # ---------------------------------------------------------
+    st.markdown("### **<u>C) LISTADO DE GUARDIAS DE ADJUNTOS Y RESIDENTES</u>**", unsafe_allow_html=True)
+    guardias_list = []
+    for date_idx, row in st.session_state.matrix_df.iterrows():
+        adjuntos_guardia = [p for p in SURGEONS if str(row[p]).strip().upper().startswith("G")]
+        residentes_guardia = [p for p in RESIDENTS if str(row[p]).strip().upper().startswith("G")]
+        
+        guardias_list.append({
+            "Fecha": date_idx,
+            "Adjuntos de Guardia": ", ".join(adjuntos_guardia),
+            "Residentes de Guardia": ", ".join(residentes_guardia)
+        })
+        
+    guardias_df = pd.DataFrame(guardias_list)
+    st.dataframe(guardias_df, hide_index=True, use_container_width=True)
+    
+    st.divider()
+    
+    # ---------------------------------------------------------
+    # D) ACTIVIDAD DE CADA ADJUNTO MENSUALMENTE
+    # ---------------------------------------------------------
+    st.markdown("### **<u>D) ACTIVIDAD DE CADA ADJUNTO MENSUALMENTE</u>**", unsafe_allow_html=True)
+    profesional = st.selectbox("Selecciona un Cirujano o Residente:", ALL_STAFF, key="sel_prof_resumen")
+    
     if profesional:
         actividades_mes = st.session_state.matrix_df[profesional].value_counts()
-        conteo = {"Guardias (G)": 0, "Quirófano (Q)": 0, "C. HOS M.": 0, "C. HOS T.": 0, "C.VEC.": 0, "C.TELD.": 0, "C.PRUD. 1": 0, "C.PRUD. 2": 0, "VAC (Vacaciones)": 0, "CUR-CONGR.": 0, "BAJA": 0}
+        conteo = {
+            "Guardias (G)": 0, "Quirófano (Q)": 0, "C. HOS M.": 0, "C. HOS T.": 0,
+            "C.VEC.": 0, "C.TELD.": 0, "C.PRUD. 1": 0, "C.PRUD. 2": 0,
+            "VAC (Vacaciones)": 0, "CUR-CONGR.": 0, "BAJA": 0
+        }
+        
         for estado, count in actividades_mes.items():
             estado = str(estado)
             if estado in ["", "none", "Libre"]: continue
+            
             if estado.startswith("G"): conteo["Guardias (G)"] += count
             if "Q" in estado: conteo["Quirófano (Q)"] += count * estado.count("Q")
             if "C. HOS M." in estado: conteo["C. HOS M."] += count
@@ -641,18 +693,11 @@ with tab3:
             if "VAC" in estado: conteo["VAC (Vacaciones)"] += count
             if "CUR-CONGR." in estado: conteo["CUR-CONGR."] += count
             if "BAJA" in estado: conteo["BAJA"] += count
-        
-        res_df = pd.DataFrame(list(conteo.items()), columns=["Actividad", "Días"]).query("Días > 0")
-        if not res_df.empty: st.dataframe(res_df, hide_index=True)
-        else: st.info(f"{profesional} sin actividad especial.")
-
-    st.divider()
-    disp_date = st.selectbox("Fecha disponibilidad:", st.session_state.matrix_df.index)
-    if disp_date:
-        disp = [s for s, e in st.session_state.matrix_df.loc[disp_date].items() if str(e) == "Libre"]
-        if disp: st.success(f"Disponibles el {disp_date}: {', '.join(disp)}")
-        else: st.warning("Sin personal Libre.")
             
-    st.divider()
-    guardias_list = [{"Fecha": idx, "Adjuntos": ", ".join([p for p in SURGEONS if str(row[p]).upper().startswith("G")]), "Residentes": ", ".join([p for p in RESIDENTS if str(row[p]).upper().startswith("G")])} for idx, row in st.session_state.matrix_df.iterrows()]
-    st.dataframe(pd.DataFrame(guardias_list), hide_index=True, use_container_width=True)
+        resumen_prof_df = pd.DataFrame(list(conteo.items()), columns=["Actividad", "Días en el Mes"])
+        resumen_prof_df = resumen_prof_df[resumen_prof_df["Días en el Mes"] > 0]
+        
+        if not resumen_prof_df.empty:
+            st.dataframe(resumen_prof_df, hide_index=True)
+        else:
+            st.info(f"{profesional} no tiene actividad especial registrada este mes.")
