@@ -18,9 +18,10 @@ ALL_STAFF = SURGEONS + RESIDENTS
 STATUSES = ["Libre", "none", "Q", "G", "SG", "C. HOS M.", "C. HOS T.", "C.VEC.", 
             "C.TELD.", "C.PRUD. 1", "C.PRUD. 2", "VAC", "CUR-CONGR.", "BAJA"]
 
-COMBO_Q = [f"{s} + Q" for s in ["C. HOS M.", "C. HOS T.", "C.VEC.", "C.TELD.", "C.PRUD. 1", "C.PRUD. 2"]]
-COMBO_G = [f"G + {s}" for s in ["C. HOS M.", "C.VEC.", "C.TELD.", "C.PRUD. 1", "C.PRUD. 2"]]
-COMBO_G_Q = [f"G + {s} + Q" for s in ["C. HOS M.", "C.VEC.", "C.TELD.", "C.PRUD. 1", "C.PRUD. 2"]]
+# COMBINACIONES VÁLIDAS: Solo permitimos mezclar "Q" con tardes, o Guardias con mañanas/tardes.
+COMBO_Q = ["C. HOS T. + Q"]
+COMBO_G = [f"G + {s}" for s in ["C. HOS M.", "C. HOS T.", "C.VEC.", "C.TELD.", "C.PRUD. 1", "C.PRUD. 2"]]
+COMBO_G_Q = [f"G + C. HOS T. + Q"]
 ALL_STATUSES = STATUSES + COMBO_Q + COMBO_G + COMBO_G_Q + ["Q + Q", "G + Q", "G + Q + Q"]
 
 RESTRICCIONES_ABSOLUTAS = ["SG", "VAC", "CUR-CONGR.", "BAJA"]
@@ -190,10 +191,16 @@ def process_consultas_ods(uploaded_file, matrix_df):
                 if c_raw in staff_map:
                     col_real = staff_map[c_raw]
                     est_actual = str(matrix_df.at[row_idx, col_real]).strip()
-                    if est_actual in ["Libre", "none", "", "nan"]:
-                        matrix_df.at[row_idx, col_real] = val_estado
-                    elif val_estado not in est_actual:
-                        matrix_df.at[row_idx, col_real] = f"{est_actual} + {val_estado}"
+                    
+                    # Si ya tiene una guardia G, combinamos (G + Consulta), si no, asignamos la consulta limpia
+                    if est_actual.startswith("G"):
+                        if val_estado not in est_actual:
+                            matrix_df.at[row_idx, col_real] = f"G + {val_estado}"
+                    else:
+                        if est_actual in ["Libre", "none", "", "nan"]:
+                            matrix_df.at[row_idx, col_real] = val_estado
+                        elif val_estado not in est_actual:
+                            matrix_df.at[row_idx, col_real] = f"{est_actual} + {val_estado}"
                     actualizados += 1
                 else:
                     informe.append(f"⚠️ Fila {fila_num + 2}: Código '{c_raw}' no reconocido.")
@@ -384,7 +391,7 @@ with st.sidebar:
 # ==========================================
 # 5. INTERFAZ: PANEL CENTRAL
 # ==========================================
-st.title("Gestión del Servicio de Cirugía General (v5.4)")
+st.title("Gestión del Servicio de Cirugía General (v5.5)")
 
 tab1, tab2, tab3 = st.tabs(["🏥 A: Gestor de Quirófanos", "📊 B: Matriz General", "📋 Resumen y Disponibilidad"])
 
