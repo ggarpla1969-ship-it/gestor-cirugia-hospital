@@ -389,7 +389,7 @@ with st.sidebar:
 # ==========================================
 # 5. INTERFAZ: PANEL CENTRAL
 # ==========================================
-st.title("Gestión del Servicio de Cirugía General (v5.7)")
+st.title("Gestión del Servicio de Cirugía General (v5.8)")
 
 tab1, tab2, tab3 = st.tabs(["🏥 A: Gestor de Quirófanos", "📊 B: Matriz General", "📋 Resumen y Disponibilidad"])
 
@@ -673,17 +673,17 @@ with tab3:
     if profesional:
         columna_prof = st.session_state.matrix_df[profesional]
         conteo = {
-            "Guardias (G)": 0,
-            "Saliente de Guardia (SG)": 0,
-            "Quirófanos (Q)": 0,
-            "C. HOS M. (Hosp. Mañana)": 0,
-            "C. HOS T. (Hosp. Tarde)": 0,
-            "C.VEC. (Vespertina)": 0,
-            "C.TELD. (Telemedicina)": 0,
+            "G": 0,
+            "SG": 0,
+            "Q": 0,
+            "C. HOS M.": 0,
+            "C. HOS T.": 0,
+            "C.VEC.": 0,
+            "C.TELD.": 0,
             "C.PRUD. 1": 0,
             "C.PRUD. 2": 0,
-            "VAC (Vacaciones)": 0,
-            "CUR-CONGR. (Congresos)": 0,
+            "VAC": 0,
+            "CUR-CONGR.": 0,
             "BAJA": 0
         }
         
@@ -697,27 +697,27 @@ with tab3:
             
             for parte in partes:
                 if parte.startswith("G"):
-                    conteo["Guardias (G)"] += 1
+                    conteo["G"] += 1
                 elif parte == "SG":
-                    conteo["Saliente de Guardia (SG)"] += 1
+                    conteo["SG"] += 1
                 elif parte == "Q":
-                    conteo["Quirófanos (Q)"] += 1
+                    conteo["Q"] += 1
                 elif parte == "C. HOS M.":
-                    conteo["C. HOS M. (Hosp. Mañana)"] += 1
+                    conteo["C. HOS M."] += 1
                 elif parte == "C. HOS T.":
-                    conteo["C. HOS T. (Hosp. Tarde)"] += 1
+                    conteo["C. HOS T."] += 1
                 elif parte == "C.VEC.":
-                    conteo["C.VEC. (Vespertina)"] += 1
+                    conteo["C.VEC."] += 1
                 elif parte == "C.TELD.":
-                    conteo["C.TELD. (Telemedicina)"] += 1
+                    conteo["C.TELD."] += 1
                 elif parte == "C.PRUD. 1":
                     conteo["C.PRUD. 1"] += 1
                 elif parte == "C.PRUD. 2":
                     conteo["C.PRUD. 2"] += 1
                 elif parte == "VAC":
-                    conteo["VAC (Vacaciones)"] += 1
+                    conteo["VAC"] += 1
                 elif parte == "CUR-CONGR.":
-                    conteo["CUR-CONGR. (Congresos)"] += 1
+                    conteo["CUR-CONGR."] += 1
                 elif parte == "BAJA":
                     conteo["BAJA"] += 1
         
@@ -727,7 +727,6 @@ with tab3:
         if not resumen_prof_df.empty:
             st.dataframe(resumen_prof_df, hide_index=True, use_container_width=True)
             
-            # Mostrar métrica resumen total de actividad
             total_actividad = resumen_prof_df["Total Días / Turnos en el Mes"].sum()
             st.info(f"📊 **Resumen total de eventos registrados para {profesional} este mes:** {total_actividad} registros.")
         else:
