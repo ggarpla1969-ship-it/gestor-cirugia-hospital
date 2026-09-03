@@ -1,3 +1,17 @@
+import subprocess
+import sys
+
+# Instalación automática interna de dependencias para evitar errores en la nube
+def instalar_dependencias():
+    paquetes = ["streamlit-gsheets", "openpyxl", "odfpy"]
+    for paquete in paquetes:
+        try:
+            __import__(paquete.replace("-", "_"))
+        except ImportError:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", paquete])
+
+instalar_dependencias()
+
 import streamlit as st
 import pandas as pd
 import datetime
@@ -77,9 +91,6 @@ COMBO_G = [f"G + {s}" for s in ["C. HOS M.", "C. HOS T.", "C.VEC.", "C.TELD.", "
 COMBO_G_Q = [f"G + C. HOS T. + Q"]
 ALL_STATUSES = STATUSES + COMBO_Q + COMBO_G + COMBO_G_Q + ["Q + Q", "G + Q", "G + Q + Q"]
 
-RESTRICCIONES_ABSOLUTAS = ["SG", "VAC", "CUR-CONGR.", "BAJA"]
-RESTRICCIONES_MANANA = ["C. HOS M.", "C.VEC.", "C.TELD.", "C.PRUD. 1", "C.PRUD. 2"]
-RESTRICCIONES_TARDE = ["C. HOS T."]
 DIAS_SEMANA = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
 # Inicializar conexión a Google Sheets
@@ -327,7 +338,6 @@ if 'update_counter' not in st.session_state:
 modo_escritura = st.session_state.get("modo_escritura", False)
 
 def guardar_en_nube():
-    """Función para volcar el estado actual a Google Sheets en tiempo real"""
     try:
         conn.update(worksheet="Matriz", data=st.session_state.matrix_df.reset_index())
         conn.update(worksheet="Quirofanos", data=st.session_state.quirofanos_df)
