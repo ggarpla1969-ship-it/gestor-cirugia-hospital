@@ -1,5 +1,0 @@
-streamlit
-pandas
-streamlit-gsheets
-openpyxl
-odfpy
