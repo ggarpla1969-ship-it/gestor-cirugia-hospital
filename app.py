@@ -3,7 +3,7 @@ import pandas as pd
 import datetime
 import calendar
 import re
-from streamlit_gsheets import GsheetsConnection
+from st_gsheets_connection import GsheetsConnection
 
 # ==========================================
 # 0. CONFIGURACIÓN Y CONTROL DE ACCESO (v6.1)
