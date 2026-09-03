@@ -1,14 +1,3 @@
-import subprocess
-import sys
-
-# Autoinstalación de dependencias por si la nube las necesita
-try:
-    import odf
-    import openpyxl
-    import streamlit_gsheets
-except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "streamlit-gsheets", "openpyxl", "odfpy"])
-
 import streamlit as st
 import pandas as pd
 import datetime
