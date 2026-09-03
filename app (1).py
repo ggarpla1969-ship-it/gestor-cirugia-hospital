@@ -1,17 +1,3 @@
-import subprocess
-import sys
-
-# Instalación automática interna de dependencias para evitar errores en la nube
-def instalar_dependencias():
-    paquetes = ["streamlit-gsheets", "openpyxl", "odfpy"]
-    for paquete in paquetes:
-        try:
-            __import__(paquete.replace("-", "_"))
-        except ImportError:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", paquete])
-
-instalar_dependencias()
-
 import streamlit as st
 import pandas as pd
 import datetime
