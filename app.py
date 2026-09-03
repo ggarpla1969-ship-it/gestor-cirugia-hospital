@@ -4,12 +4,6 @@ import datetime
 import calendar
 import re
 
-try:
-    from streamlit_gsheets import GsheetsConnection
-    HAS_GSHEETS = True
-except ImportError:
-    HAS_GSHEETS = False
-
 # ==========================================
 # 0. CONFIGURACIÓN Y CONTROL DE ACCESO
 # ==========================================
@@ -66,7 +60,7 @@ if not check_authentication():
     st.stop()
 
 # ==========================================
-# 1. CONSTANTES Y CONEXIÓN
+# 1. CONSTANTES DEL SERVICIO
 # ==========================================
 SURGEONS = [f"A{i}" for i in range(1, 8)] + [f"B{i}" for i in range(1, 10)] + \
            [f"C{i}" for i in range(1, 7)] + [f"D{i}" for i in range(1, 7)]
@@ -76,23 +70,10 @@ ALL_STAFF = SURGEONS + RESIDENTS
 
 STATUSES = ["Libre", "none", "Q", "G", "SG", "C. HOS M.", "C. HOS T.", "C.VEC.", 
             "C.TELD.", "C.PRUD. 1", "C.PRUD. 2", "VAC", "CUR-CONGR.", "BAJA"]
-
-COMBO_Q = ["C. HOS T. + Q"]
-COMBO_G = [f"G + {s}" for s in ["C. HOS M.", "C. HOS T.", "C.VEC.", "C.TELD.", "C.PRUD. 1", "C.PRUD. 2"]]
-COMBO_G_Q = [f"G + C. HOS T. + Q"]
-ALL_STATUSES = STATUSES + COMBO_Q + COMBO_G + COMBO_G_Q + ["Q + Q", "G + Q", "G + Q + Q"]
 DIAS_SEMANA = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
-# Inicializar conexión de forma segura
-conn = None
-if HAS_GSHEETS:
-    try:
-        conn = st.connection("gsheets", type=GsheetsConnection)
-    except Exception:
-        conn = None
-
 # ==========================================
-# 2. FUNCIONES DE LÓGICA
+# 2. FUNCIONES DE LÓGICA LOCAL
 # ==========================================
 def generate_base_matrix(year, month):
     num_days = calendar.monthrange(year, month)[1]
@@ -105,14 +86,6 @@ def generate_base_matrix(year, month):
         default_status = "none" if weekday >= 5 else "Libre"
         for col in df.columns:
             df.at[row_idx, col] = default_status
-    return df
-
-def apply_guardia_rules(df):
-    for col in df.columns:
-        for i in range(len(df) - 1):
-            current_status = str(df.iloc[i][col]).strip().upper()
-            if current_status == "G" or current_status.startswith("G +"):
-                df.iat[i+1, df.columns.get_loc(col)] = "SG"
     return df
 
 def style_matrix(df):
@@ -130,63 +103,26 @@ def style_matrix(df):
     return styles
 
 # ==========================================
-# 3. INICIALIZACIÓN DE ESTADO
+# 3. INICIALIZACIÓN DE ESTADO LOCAL
 # ==========================================
 now = datetime.datetime.now()
 if 'matrix_df' not in st.session_state:
     st.session_state.current_year = now.year
     st.session_state.current_month = now.month
-    loaded = False
-    if conn is not None:
-        try:
-            df_cloud = conn.read(worksheet="Matriz", ttl=0)
-            if not df_cloud.empty:
-                df_cloud.set_index(df_cloud.columns[0], inplace=True)
-                st.session_state.matrix_df = df_cloud
-                loaded = True
-        except Exception:
-            loaded = False
-    if not loaded:
-        st.session_state.matrix_df = generate_base_matrix(now.year, now.month)
+    st.session_state.matrix_df = generate_base_matrix(now.year, now.month)
 
 if 'quirofanos_df' not in st.session_state:
-    q_loaded = False
-    if conn is not None:
-        try:
-            q_cloud = conn.read(worksheet="Quirofanos", ttl=0)
-            if not q_cloud.empty:
-                st.session_state.quirofanos_df = q_cloud
-                q_loaded = True
-        except Exception:
-            q_loaded = False
-    if not q_loaded:
-        st.session_state.quirofanos_df = pd.DataFrame(columns=["Fecha", "Unidad", "Grupo", "Quirófano", "Turno", "HC", "Equipo"])
-
-if 'update_counter' not in st.session_state:
-    st.session_state.update_counter = 0
+    st.session_state.quirofanos_df = pd.DataFrame(columns=["Fecha", "Unidad", "Grupo", "Quirófano", "Turno", "HC", "Equipo"])
 
 modo_escritura = st.session_state.get("modo_escritura", False)
 
-def guardar_en_nube():
-    if conn is not None:
-        try:
-            conn.update(worksheet="Matriz", data=st.session_state.matrix_df.reset_index())
-            conn.update(worksheet="Quirofanos", data=st.session_state.quirofanos_df)
-            st.success("☁️ ¡Cambios guardados en la nube!")
-        except Exception as e:
-            st.error(f"Error al sincronizar: {e}")
-    else:
-        st.warning("⚠️ Conexión a Google Sheets no disponible. Cambios guardados solo localmente.")
-
 # ==========================================
-# 4. SIDEBAR Y PANEL CENTRAL
+# 4. INTERFAZ Y PESTAÑAS
 # ==========================================
 with st.sidebar:
-    st.header("📅 Calendario y Sincronización")
+    st.header("📅 Calendario y Gestión")
     if modo_escritura:
         st.success(f"🔓 Modo: **Escritura** ({st.session_state.get('usuario_actual', 'Admin')})")
-        if st.button("☁️ Sincronizar Cambios a la Nube", type="primary"):
-            guardar_en_nube()
     else:
         st.info("👁️ Modo: **Solo Lectura**")
 
