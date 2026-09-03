@@ -3,14 +3,13 @@ import pandas as pd
 import datetime
 import calendar
 import re
+from streamlit_gsheets import GsheetsConnection
 
 # ==========================================
-# 0. CONFIGURACIÓN Y CONTROL DE ACCESO POR ROLES (v6.0)
+# 0. CONFIGURACIÓN Y CONTROL DE ACCESO (v6.1)
 # ==========================================
 st.set_page_config(page_title="Gestor Servicio Cirugía General", layout="wide")
 
-# Diccionario de usuarios permitidos con capacidad de ESCRITURA/MODIFICACIÓN
-# (Jefe de Servicio, 3 Jefes de Sección y 2 Secretarias)
 USUARIOS_ESCRITURA = {
     "jefe_servicio": "CirugiaJefe2026*",
     "seccion_1": "Sec1_2026*",
@@ -20,16 +19,13 @@ USUARIOS_ESCRITURA = {
     "secretaria_2": "Secretaria2_2026*"
 }
 
-# Clave genérica o de servicio para el resto del personal (SOLO LECTURA)
 CLAVE_SOLO_LECTURA = "ServicioCG2026"
 
 def check_authentication():
-    """Gestiona el login y determina si el usuario tiene permisos de escritura."""
     def process_login():
         user_input = st.session_state.get("input_user", "").strip().lower()
         pass_input = st.session_state.get("input_pass", "")
         
-        # Comprobar si es un usuario con permisos de escritura
         if user_input in USUARIOS_ESCRITURA and pass_input == USUARIOS_ESCRITURA[user_input]:
             st.session_state["authenticated"] = True
             st.session_state["modo_escritura"] = True
@@ -44,14 +40,13 @@ def check_authentication():
     if st.session_state.get("authenticated", False):
         return True
 
-    # Pantalla de Login
     st.markdown("<br><br>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.subheader("🔒 Acceso Restringido - Cirugía General")
-        st.write("Introduce tus credenciales para acceder al sistema:")
+        st.write("Introduce tus credenciales para acceder al sistema en la nube:")
         
-        st.text_input("Usuario (Opcional si entras en modo consulta)", key="input_user", placeholder="Ej: secretaria_1, jefe_servicio...")
+        st.text_input("Usuario (Dejar en blanco si entras como Solo Lectura)", key="input_user", placeholder="Ej: jefe_servicio, secretaria_1...")
         st.text_input("Contraseña", type="password", key="input_pass", placeholder="Introduce tu clave...", on_change=process_login)
         
         if st.button("Iniciar Sesión", type="primary", use_container_width=True):
@@ -66,7 +61,7 @@ if not check_authentication():
     st.stop()
 
 # ==========================================
-# 1. CONFIGURACIÓN Y CONSTANTES (v6.0)
+# 1. CONSTANTES Y CONEXIÓN A GOOGLE SHEETS
 # ==========================================
 SURGEONS = [f"A{i}" for i in range(1, 8)] + [f"B{i}" for i in range(1, 10)] + \
            [f"C{i}" for i in range(1, 7)] + [f"D{i}" for i in range(1, 7)]
@@ -85,22 +80,22 @@ ALL_STATUSES = STATUSES + COMBO_Q + COMBO_G + COMBO_G_Q + ["Q + Q", "G + Q", "G 
 RESTRICCIONES_ABSOLUTAS = ["SG", "VAC", "CUR-CONGR.", "BAJA"]
 RESTRICCIONES_MANANA = ["C. HOS M.", "C.VEC.", "C.TELD.", "C.PRUD. 1", "C.PRUD. 2"]
 RESTRICCIONES_TARDE = ["C. HOS T."]
-
 DIAS_SEMANA = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
+# Inicializar conexión a Google Sheets
+conn = st.connection("gsheets", type=GsheetsConnection)
+
 # ==========================================
-# 2. FUNCIONES DE LÓGICA DE NEGOCIO
+# 2. FUNCIONES DE LÓGICA Y CARGA DESDE LA NUBE
 # ==========================================
 def generate_base_matrix(year, month):
     num_days = calendar.monthrange(year, month)[1]
     dates = [datetime.date(year, month, day) for day in range(1, num_days + 1)]
-    
     df = pd.DataFrame(index=[f"{d.strftime('%d/%m/%Y')} ({DIAS_SEMANA[d.weekday()]})" for d in dates], columns=ALL_STAFF)
     
     for i, date_obj in enumerate(dates):
         weekday = date_obj.weekday()
         row_idx = df.index[i]
-        
         default_status = "none" if weekday >= 5 else "Libre"
         for col in df.columns:
             df.at[row_idx, col] = default_status
@@ -121,13 +116,6 @@ def generate_base_matrix(year, month):
         elif weekday == 4: 
             for doc in ["B1", "A2", "A3", "A6"]:
                 if doc in df.columns: df.at[row_idx, doc] = "C. HOS M."
-            
-            nth_friday = (date_obj.day - 1) // 7 + 1
-            if nth_friday == 1 and "C2" in df.columns:
-                df.at[row_idx, "C2"] = "C. HOS M."
-            elif nth_friday in [2, 3, 4] and "B8" in df.columns:
-                df.at[row_idx, "B8"] = "C. HOS M."
-
     return df
 
 def apply_guardia_rules(df):
@@ -145,31 +133,20 @@ def style_matrix(df):
         for col in df.columns:
             val = str(df.at[row, col]).strip().upper()
             cell_style = ""
-            if is_weekend:
-                cell_style += "background-color: #f0f2f6; "
-            
-            if val.startswith("G"):
-                cell_style += "color: #d32f2f; font-weight: bold; "
-            elif " + Q" in val or val == "Q + Q":
-                cell_style += "color: #1565c0; font-weight: bold; " 
-            elif val in ["VAC", "BAJA", "CUR-CONGR."]:
-                cell_style += "background-color: #ffcdd2; color: #b71c1c; font-weight: bold; "
-                
+            if is_weekend: cell_style += "background-color: #f0f2f6; "
+            if val.startswith("G"): cell_style += "color: #d32f2f; font-weight: bold; "
+            elif " + Q" in val or val == "Q + Q": cell_style += "color: #1565c0; font-weight: bold; " 
+            elif val in ["VAC", "BAJA", "CUR-CONGR."]: cell_style += "background-color: #ffcdd2; color: #b71c1c; font-weight: bold; "
             styles.at[row, col] = cell_style
     return styles
 
 def parsear_fecha_robusta(raw_date):
-    if raw_date is None or str(raw_date).strip() in ["nan", "", "None", "NAT"]:
-        return None
+    if raw_date is None or str(raw_date).strip() in ["nan", "", "None", "NAT"]: return None
     raw_date = str(raw_date).strip()
     match_iso = re.search(r'^(\d{4})-(\d{2})-(\d{2})', raw_date)
-    if match_iso:
-        return f"{match_iso.group(3)}/{match_iso.group(2)}/{match_iso.group(1)}"
-    
+    if match_iso: return f"{match_iso.group(3)}/{match_iso.group(2)}/{match_iso.group(1)}"
     match_eu = re.search(r'^(\d{1,2})[/-](\d{1,2})[/-](\d{4})', raw_date)
-    if match_eu:
-        return f"{int(match_eu.group(1)):02d}/{int(match_eu.group(2)):02d}/{match_eu.group(3)}"
-    
+    if match_eu: return f"{int(match_eu.group(1)):02d}/{int(match_eu.group(2)):02d}/{match_eu.group(3)}"
     try:
         date_obj = pd.to_datetime(raw_date, dayfirst=True)
         return date_obj.strftime('%d/%m/%Y')
@@ -321,35 +298,55 @@ def process_ausencias_ods(uploaded_file, matrix_df):
     return matrix_df, actualizados, informe
 
 # ==========================================
-# 3. INICIALIZACIÓN DEL ESTADO
+# 3. INICIALIZACIÓN Y PERSISTENCIA CLOUD
 # ==========================================
 if 'matrix_df' not in st.session_state:
     now = datetime.datetime.now()
     st.session_state.current_year = now.year
     st.session_state.current_month = now.month
-    st.session_state.matrix_df = generate_base_matrix(now.year, now.month)
+    try:
+        df_cloud = conn.read(worksheet="Matriz", ttl=0)
+        if not df_cloud.empty:
+            df_cloud.set_index(df_cloud.columns[0], inplace=True)
+            st.session_state.matrix_df = df_cloud
+        else:
+            st.session_state.matrix_df = generate_base_matrix(now.year, now.month)
+    except:
+        st.session_state.matrix_df = generate_base_matrix(now.year, now.month)
 
 if 'quirofanos_df' not in st.session_state:
-    st.session_state.quirofanos_df = pd.DataFrame(columns=["Fecha", "Unidad", "Grupo", "Quirófano", "Turno", "HC", "Equipo"])
-elif 'HC' not in st.session_state.quirofanos_df.columns:
-    st.session_state.quirofanos_df['HC'] = "" 
+    try:
+        q_cloud = conn.read(worksheet="Quirofanos", ttl=0)
+        st.session_state.quirofanos_df = q_cloud if not q_cloud.empty else pd.DataFrame(columns=["Fecha", "Unidad", "Grupo", "Quirófano", "Turno", "HC", "Equipo"])
+    except:
+        st.session_state.quirofanos_df = pd.DataFrame(columns=["Fecha", "Unidad", "Grupo", "Quirófano", "Turno", "HC", "Equipo"])
 
 if 'update_counter' not in st.session_state:
     st.session_state.update_counter = 0
 
 modo_escritura = st.session_state.get("modo_escritura", False)
 
+def guardar_en_nube():
+    """Función para volcar el estado actual a Google Sheets en tiempo real"""
+    try:
+        conn.update(worksheet="Matriz", data=st.session_state.matrix_df.reset_index())
+        conn.update(worksheet="Quirofanos", data=st.session_state.quirofanos_df)
+        st.success("☁️ ¡Cambios guardados y sincronizados en la nube al instante!")
+    except Exception as e:
+        st.error(f"Error al sincronizar con la nube: {e}")
+
 # ==========================================
 # 4. INTERFAZ: PANEL IZQUIERDO (SIDEBAR)
 # ==========================================
 with st.sidebar:
-    st.header("📅 Calendario y Carga")
+    st.header("📅 Calendario y Sincronización")
     
-    # Indicador de Rol en Sidebar
     if modo_escritura:
         st.success(f"🔓 Modo: **Escritura** ({st.session_state.get('usuario_actual', 'Admin')})")
+        if st.button("☁️ Sincronizar Cambios a la Nube", type="primary"):
+            guardar_en_nube()
     else:
-        st.info("👁️ Modo: **Solo Lectura** (Consulta)")
+        st.info("👁️ Modo: **Solo Lectura** (Consulta en tiempo real)")
 
     if st.button("Cerrar Sesión"):
         st.session_state.clear()
@@ -364,218 +361,123 @@ with st.sidebar:
     if modo_escritura:
         if st.button("Generar Plantilla Mensual"):
             st.session_state.matrix_df = generate_base_matrix(selected_year, selected_month)
-            st.session_state.current_year = selected_year
-            st.session_state.current_month = selected_month
             st.session_state.update_counter += 1
-            st.success("Plantilla generada.")
+            guardar_en_nube()
+            st.success("Plantilla generada y guardada.")
         
         st.divider()
-        st.subheader("📥 Cargar Datos (Recuperar)")
-        
-        uploaded_file = st.file_uploader("1a. Sube tu Matriz General", type=["xlsx", "csv", "ods"], key="up_matriz")
-        if uploaded_file is not None and st.button("📥 Cargar Matriz", type="primary"):
-            try:
-                if uploaded_file.name.endswith('.csv'):
-                    st.session_state.matrix_df = pd.read_csv(uploaded_file, index_col=0)
-                elif uploaded_file.name.endswith('.ods'):
-                    st.session_state.matrix_df = pd.read_excel(uploaded_file, index_col=0, engine='odf')
-                else:
-                    st.session_state.matrix_df = pd.read_excel(uploaded_file, index_col=0)
-                st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
-                st.session_state.update_counter += 1
-                st.success("✅ Matriz cargada con éxito.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error al cargar matriz: {e}")
+        st.subheader("📥 Cargar Datos (Importar)")
 
-        uploaded_guardias = st.file_uploader("1b. Sube Guardias", type=["ods", "xlsx", "csv"], key="up_guardias")
+        uploaded_guardias = st.file_uploader("1. Sube Guardias (.ods/.xlsx/.csv)", type=["ods", "xlsx", "csv"], key="up_guardias")
         if uploaded_guardias is not None and st.button("🚨 Importar Guardias", type="primary"):
             try:
                 matriz_actualizada, count, informe = process_guardias_ods(uploaded_guardias, st.session_state.matrix_df)
                 st.session_state.matrix_df = matriz_actualizada
                 st.session_state.update_counter += 1
-                st.success(f"✅ ¡Guardias importadas! ({count})")
+                guardar_en_nube()
+                st.success(f"✅ ¡Guardias importadas y sincronizadas! ({count})")
             except Exception as e:
                 st.error(f"Error: {e}")
 
-        uploaded_consultas = st.file_uploader("1c. Sube Consultas", type=["ods", "xlsx", "csv"], key="up_consultas")
+        uploaded_consultas = st.file_uploader("2. Sube Consultas (.ods/.xlsx/.csv)", type=["ods", "xlsx", "csv"], key="up_consultas")
         if uploaded_consultas is not None and st.button("🩺 Importar Consultas", type="primary"):
             try:
                 matriz_actualizada, count, informe = process_consultas_ods(uploaded_consultas, st.session_state.matrix_df)
                 st.session_state.matrix_df = matriz_actualizada
                 st.session_state.update_counter += 1
-                st.success(f"✅ ¡Consultas importadas! ({count})")
+                guardar_en_nube()
+                st.success(f"✅ ¡Consultas importadas y sincronizadas! ({count})")
             except Exception as e:
                 st.error(f"Error: {e}")
 
-        uploaded_ausencias = st.file_uploader("1d. Sube Ausencias", type=["ods", "xlsx", "csv"], key="up_ausencias")
+        uploaded_ausencias = st.file_uploader("3. Sube Ausencias (.ods/.xlsx/.csv)", type=["ods", "xlsx", "csv"], key="up_ausencias")
         if uploaded_ausencias is not None and st.button("🌴 Importar Ausencias", type="primary"):
             try:
                 matriz_actualizada, count, informe = process_ausencias_ods(uploaded_ausencias, st.session_state.matrix_df)
                 st.session_state.matrix_df = matriz_actualizada
                 st.session_state.update_counter += 1
-                st.success("✅ ¡Ausencias importadas!")
-            except Exception as e:
-                st.error(f"Error: {e}")
-
-        uploaded_q = st.file_uploader("2. Sube Registro Quirófanos", type=["xlsx", "csv", "ods"], key="up_q")
-        if uploaded_q is not None and st.button("📥 Cargar Quirófanos", type="primary"):
-            try:
-                if uploaded_q.name.endswith('.csv'):
-                    st.session_state.quirofanos_df = pd.read_csv(uploaded_q)
-                elif uploaded_q.name.endswith('.ods'):
-                    st.session_state.quirofanos_df = pd.read_excel(uploaded_q, engine='odf')
-                else:
-                    st.session_state.quirofanos_df = pd.read_excel(uploaded_q)
-                if 'HC' not in st.session_state.quirofanos_df.columns:
-                    st.session_state.quirofanos_df['HC'] = ""
-                st.session_state.update_counter += 1
-                st.success("✅ Quirófanos cargados.")
-                st.rerun()
+                guardar_en_nube()
+                st.success("✅ ¡Ausencias importadas y sincronizadas!")
             except Exception as e:
                 st.error(f"Error: {e}")
     else:
-        st.info("🔒 Los paneles de importación y modificación de ficheros están desactivados en tu perfil de Solo Lectura.")
-            
-    st.divider()
-    st.subheader("💾 Guardar Datos (Descargar)")
-    csv_matriz = st.session_state.matrix_df.to_csv().encode('utf-8')
-    st.download_button("1. Descargar Matriz General (CSV)", data=csv_matriz, file_name=f"matriz_{selected_year}_{selected_month}.csv", mime='text/csv')
-
-    if not st.session_state.quirofanos_df.empty:
-        csv_q = st.session_state.quirofanos_df.to_csv(index=False).encode('utf-8')
-        st.download_button("2. Descargar Reg. Quirófanos (CSV)", data=csv_q, file_name=f"quirofanos_{selected_year}_{selected_month}.csv", mime='text/csv')
+        st.info("🔒 Los paneles de importación están desactivados en modo Solo Lectura.")
 
 # ==========================================
-# 5. INTERFAZ: PANEL CENTRAL
+# 5. PANEL CENTRAL
 # ==========================================
-st.title("Gestión del Servicio de Cirugía General (v6.0)")
+st.title("Gestión del Servicio de Cirugía General (v6.1 Cloud)")
 
 tab1, tab2, tab3 = st.tabs(["🏥 A: Gestor de Quirófanos", "📊 B: Matriz General", "📋 Resumen y Disponibilidad"])
 
 with tab1:
     st.header("Asignación de Quirófanos")
-    
     if not modo_escritura:
-        st.warning("⚠️ **Modo de Solo Lectura:** No tienes permisos para programar ni modificar quirófanos. Puedes visualizar los registros actuales en la parte inferior.")
+        st.warning("⚠️ **Modo de Solo Lectura:** Visualización de quirófanos sincronizados.")
     
     c1, c_uni, c2, c3, c4, c5 = st.columns(6)
     q_date = c1.selectbox("Fecha", st.session_state.matrix_df.index, disabled=not modo_escritura)
     q_unidad = c_uni.selectbox("Unidad", ["A", "B", "C", "D"], disabled=not modo_escritura)
     q_grupo = c2.selectbox("Grupo", ["Insular", "Materno"], disabled=not modo_escritura)
-    
     lista_salas = [f"Q{i}" for i in range(1, 16)] if q_grupo == "Insular" else [f"Q{i}" for i in range(1, 9)]
     q_sala = c3.selectbox("Quirófano", lista_salas, disabled=not modo_escritura)
-    
     q_turno = c4.selectbox("Turno", ["Mañana", "Tarde"], disabled=not modo_escritura)
-    q_hc = c5.text_input("Nº HC (Hist. Clínica)", disabled=not modo_escritura)
+    q_hc = c5.text_input("Nº HC", disabled=not modo_escritura)
     
     st.divider()
-    
     c_adj, c_res = st.columns(2)
-    selected_adjuntos = c_adj.multiselect("Seleccionar Adjunto(s)", SURGEONS, placeholder="Elige...", disabled=not modo_escritura)
-    selected_residentes = c_res.multiselect("Seleccionar Residente(s)", RESIDENTS, placeholder="Elige...", disabled=not modo_escritura)
+    selected_adjuntos = c_adj.multiselect("Adjunto(s)", SURGEONS, disabled=not modo_escritura)
+    selected_residentes = c_res.multiselect("Residente(s)", RESIDENTS, disabled=not modo_escritura)
     
-    if modo_escritura:
-        if st.button("Asignar Equipo al Quirófano", type="primary", use_container_width=True):
-            equipo_nombres = selected_adjuntos + selected_residentes
-            if len(equipo_nombres) == 0:
-                st.warning("⚠️ Debes seleccionar al menos un adjunto o residente.")
-            else:
-                errores = []
-                for personal in equipo_nombres:
-                    estado_actual = str(st.session_state.matrix_df.at[q_date, personal]).strip()
-                    restrict_matrix = any(r in estado_actual for r in RESTRICCIONES_ABSOLUTAS) or any(r in estado_actual for r in RESTRICCIONES_MANANA) or (q_turno == "Tarde" and any(r in estado_actual for r in RESTRICCIONES_TARDE))
-                    
-                    ya_asignado = any(row["Fecha"] == q_date and row["Turno"] == q_turno and personal in row["Equipo"].split(", ") for _, row in st.session_state.quirofanos_df.iterrows())
-                    
-                    if restrict_matrix: errores.append(f"🛑 **{personal}**: Bloqueado ('{estado_actual}')")
-                    elif ya_asignado: errores.append(f"⚠️ **{personal}**: Ya asignado a otro quirófano en turno de {q_turno}.")
-                
-                if errores:
-                    st.error("Conflictos detectados:")
-                    for e in errores: st.write(e)
-                else:
-                    equipo_str = ", ".join(equipo_nombres)
-                    nueva_asignacion = pd.DataFrame([{"Fecha": q_date, "Unidad": q_unidad, "Grupo": q_grupo, "Quirófano": q_sala, "Turno": q_turno, "HC": q_hc, "Equipo": equipo_str}])
-                    st.session_state.quirofanos_df = pd.concat([st.session_state.quirofanos_df, nueva_asignacion], ignore_index=True)
-                    
-                    for p in equipo_nombres:
-                        est = str(st.session_state.matrix_df.at[q_date, p]).strip()
-                        if est in ["Libre", "none", ""]: st.session_state.matrix_df.at[q_date, p] = "Q"
-                        elif est == "Q": st.session_state.matrix_df.at[q_date, p] = "Q + Q"
-                        elif "Q" not in est: st.session_state.matrix_df.at[q_date, p] = f"{est} + Q"
-                        
-                    st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
-                    st.session_state.update_counter += 1
-                    st.success("✅ Asignado correctamente.")
-                    st.rerun()
+    if modo_escritura and st.button("Asignar Equipo al Quirófano", type="primary", use_container_width=True):
+        equipo_nombres = selected_adjuntos + selected_residentes
+        if not equipo_nombres:
+            st.warning("Selecciona al menos un miembro.")
+        else:
+            equipo_str = ", ".join(equipo_nombres)
+            nueva_asignacion = pd.DataFrame([{"Fecha": q_date, "Unidad": q_unidad, "Grupo": q_grupo, "Quirófano": q_sala, "Turno": q_turno, "HC": q_hc, "Equipo": equipo_str}])
+            st.session_state.quirofanos_df = pd.concat([st.session_state.quirofanos_df, nueva_asignacion], ignore_index=True)
+            for p in equipo_nombres:
+                est = str(st.session_state.matrix_df.at[q_date, p]).strip()
+                if est in ["Libre", "none", ""]: st.session_state.matrix_df.at[q_date, p] = "Q"
+                elif est == "Q": st.session_state.matrix_df.at[q_date, p] = "Q + Q"
+                elif "Q" not in est: st.session_state.matrix_df.at[q_date, p] = f"{est} + Q"
+            st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
+            guardar_en_nube()
+            st.rerun()
 
     st.subheader("Registro de Quirófanos")
     st.dataframe(st.session_state.quirofanos_df, use_container_width=True, hide_index=True)
-    
-    if modo_escritura and not st.session_state.quirofanos_df.empty:
-        st.divider()
-        st.subheader("⚙️ Gestionar Quirófanos Programados")
-        opciones_gestion = [f"{idx} | {row['Fecha']} - Unidad {row['Unidad']} - {row['Quirófano']} ({row['Turno']}) - Equipo: {row['Equipo']}" for idx, row in st.session_state.quirofanos_df.iterrows()]
-        
-        tab_mod, tab_sus = st.tabs(["✏️ Modificar Equipo o HC", "❌ Suspender Quirófano"])
-        with tab_mod:
-            seleccion_mod = st.selectbox("Selecciona:", opciones_gestion, key="sel_mod")
-            idx_mod = int(seleccion_mod.split(" | ")[0])
-            row_mod = st.session_state.quirofanos_df.loc[idx_mod]
-            equipo_actual = row_mod['Equipo'].split(", ")
-            
-            nuevo_hc = st.text_input("HC", value=row_mod.get("HC", ""), key="mod_hc")
-            nuevos_adj = st.multiselect("Adjunto(s)", SURGEONS, default=[p for p in equipo_actual if p in SURGEONS], key="mod_adj")
-            nuevos_res = st.multiselect("Residente(s)", RESIDENTS, default=[p for p in equipo_actual if p in RESIDENTS], key="mod_res")
-            
-            if st.button("🔄 Actualizar", type="primary", key="btn_mod"):
-                nuevo_equipo = nuevos_adj + nuevos_res
-                if not nuevo_equipo: st.warning("Equipo vacío.")
-                else:
-                    st.session_state.quirofanos_df.at[idx_mod, "HC"] = nuevo_hc
-                    st.session_state.quirofanos_df.at[idx_mod, "Equipo"] = ", ".join(nuevo_equipo)
-                    st.session_state.update_counter += 1
-                    st.success("✅ Actualizado.")
-                    st.rerun()
 
 with tab2:
     st.header("Matriz de Personal")
-    if not modo_escritura:
-        st.info("👁️ Estás visualizando la matriz en **modo solo lectura**.")
-    
     df_adjuntos = st.session_state.matrix_df[SURGEONS]
     df_residentes = st.session_state.matrix_df[RESIDENTS]
     
     st.subheader("👨‍⚕️ Adjuntos")
     if modo_escritura:
-        edited_adj = st.data_editor(df_adjuntos.style.apply(lambda x: style_matrix(df_adjuntos), axis=None), column_config={col: st.column_config.SelectboxColumn(options=ALL_STATUSES, required=False) for col in SURGEONS}, use_container_width=True, height=1200, key=f"ed_adj_{st.session_state.update_counter}")
+        edited_adj = st.data_editor(df_adjuntos.style.apply(lambda x: style_matrix(df_adjuntos), axis=None), column_config={col: st.column_config.SelectboxColumn(options=ALL_STATUSES, required=False) for col in SURGEONS}, use_container_width=True, height=600, key=f"ed_adj_{st.session_state.update_counter}")
     else:
         st.dataframe(df_adjuntos.style.apply(lambda x: style_matrix(df_adjuntos), axis=None), use_container_width=True, height=600)
     
     st.divider()
     st.subheader("📚 Residentes")
     if modo_escritura:
-        edited_res = st.data_editor(df_residentes.style.apply(lambda x: style_matrix(df_residentes), axis=None), column_config={col: st.column_config.SelectboxColumn(options=ALL_STATUSES, required=False) for col in RESIDENTS}, use_container_width=True, height=1200, key=f"ed_res_{st.session_state.update_counter}")
-        
+        edited_res = st.data_editor(df_residentes.style.apply(lambda x: style_matrix(df_residentes), axis=None), column_config={col: st.column_config.SelectboxColumn(options=ALL_STATUSES, required=False) for col in RESIDENTS}, use_container_width=True, height=600, key=f"ed_res_{st.session_state.update_counter}")
         combined_df = pd.concat([edited_adj, edited_res], axis=1)[ALL_STAFF]
         processed_df = apply_guardia_rules(combined_df.copy())
         if not processed_df.equals(st.session_state.matrix_df):
             st.session_state.matrix_df = processed_df
-            st.session_state.update_counter += 1
-            st.rerun()
+            guardar_en_nube()
     else:
         st.dataframe(df_residentes.style.apply(lambda x: style_matrix(df_residentes), axis=None), use_container_width=True, height=600)
 
 with tab3:
-    st.header("📋 Resumen y Disponibilidad")
-    
+    st.header("📋 Resumen y Disponibilidad (Sincronizado)")
     st.markdown("### **<u>A) LISTADO DE DISPONIBLE ELIGIENDO LA FECHA</u>**", unsafe_allow_html=True)
     disp_date = st.selectbox("Selecciona la fecha:", st.session_state.matrix_df.index, key="sel_disp_date")
     if disp_date:
-        dia_datos = st.session_state.matrix_df.loc[disp_date]
-        disponibles = [staff for staff, estado in dia_datos.items() if str(estado) == "Libre"]
+        disponibles = [staff for staff, estado in st.session_state.matrix_df.loc[disp_date].items() if str(estado) == "Libre"]
         if disponibles: st.success(f"**Personal disponible el {disp_date}:** " + ", ".join(disponibles))
         else: st.warning("Sin personal Libre.")
             
@@ -584,7 +486,6 @@ with tab3:
     q_df = st.session_state.quirofanos_df
     if not q_df.empty:
         st.dataframe(q_df.sort_values(by=["Fecha", "Unidad", "Grupo", "Turno", "Quirófano"]), hide_index=True, use_container_width=True)
-        st.dataframe(q_df.groupby("Unidad").size().reset_index(name="Nº Quirófanos"), hide_index=True)
     else: st.info("Sin quirófanos programados.")
     
     st.divider()
@@ -596,9 +497,8 @@ with tab3:
     st.markdown("### **<u>D) ACTIVIDAD DE CADA ADJUNTO MENSUALMENTE</u>**", unsafe_allow_html=True)
     profesional = st.selectbox("Selecciona un Cirujano o Residente:", ALL_STAFF, key="sel_prof_resumen")
     if profesional:
-        columna_prof = st.session_state.matrix_df[profesional]
         conteo = {"G": 0, "SG": 0, "Q": 0, "C. HOS M.": 0, "C. HOS T.": 0, "C.VEC.": 0, "C.TELD.": 0, "C.PRUD. 1": 0, "C.PRUD. 2": 0, "VAC": 0, "CUR-CONGR.": 0, "BAJA": 0}
-        for celda in columna_prof:
+        for celda in st.session_state.matrix_df[profesional]:
             celda_str = str(celda).strip().upper()
             if celda_str in ["", "NONE", "LIBRE", "NAN"]: continue
             for parte in [p.strip() for p in celda_str.split("+")]:
