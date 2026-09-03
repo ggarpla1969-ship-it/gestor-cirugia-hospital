@@ -5,10 +5,44 @@ import calendar
 import re
 
 # ==========================================
-# 1. CONFIGURACIÓN Y CONSTANTES
+# 0. CONFIGURACIÓN Y SEGURIDAD (AUTENTICACIÓN)
 # ==========================================
 st.set_page_config(page_title="Gestor Servicio Cirugía General", layout="wide")
 
+def check_password():
+    """Devuelve True si el usuario ha introducido la contraseña correcta."""
+    def password_entered():
+        # Comprueba contra st.secrets o usa una clave por defecto de emergencia
+        clave_configurada = st.secrets.get("PASSWORD", "Cirugia2026*")
+        if st.session_state["password"] == clave_configurada:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  
+        else:
+            st.session_state["password_correct"] = False
+
+    if st.session_state.get("password_correct", False):
+        return True
+
+    # Pantalla de Login centrada
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.subheader("🔒 Acceso Restringido - Servicio de Cirugía General")
+        st.write("Por favor, introduce la clave de acceso corporativa para iniciar el sistema:")
+        st.text_input(
+            "Contraseña", type="password", on_change=password_entered, key="password", label_visibility="collapsed", placeholder="Introduce tu clave..."
+        )
+        if "password_correct" in st.session_state:
+            st.error("😕 Contraseña incorrecta. Inténtelo de nuevo.")
+    return False
+
+# Bloquear ejecución si no se autentica
+if not check_password():
+    st.stop()
+
+# ==========================================
+# 1. CONFIGURACIÓN Y CONSTANTES (v5.9)
+# ==========================================
 SURGEONS = [f"A{i}" for i in range(1, 8)] + [f"B{i}" for i in range(1, 10)] + \
            [f"C{i}" for i in range(1, 7)] + [f"D{i}" for i in range(1, 7)]
 RESIDENTS = ["R1A", "R1B", "R2A", "R2B", "R3A", "R3B", "R4A", "R4B", 
@@ -389,7 +423,7 @@ with st.sidebar:
 # ==========================================
 # 5. INTERFAZ: PANEL CENTRAL
 # ==========================================
-st.title("Gestión del Servicio de Cirugía General (v5.8)")
+st.title("Gestión del Servicio de Cirugía General (v5.9)")
 
 tab1, tab2, tab3 = st.tabs(["🏥 A: Gestor de Quirófanos", "📊 B: Matriz General", "📋 Resumen y Disponibilidad"])
 
@@ -692,7 +726,6 @@ with tab3:
             if celda_str in ["", "NONE", "LIBRE", "NAN"]:
                 continue
             
-            # Desglosar combinaciones (ej: "G + C. HOS M." o "C. HOS T. + Q")
             partes = [p.strip() for p in celda_str.split("+")]
             
             for parte in partes:
