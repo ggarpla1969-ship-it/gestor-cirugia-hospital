@@ -304,21 +304,31 @@ def limpiar_estado_q(fecha, docs):
                 st.session_state.matrix_df.at[fecha, doc] = est[:-4]
 
 # ==========================================
-# 3. CONEXIÓN A BASE DE DATOS Y ESTADO LOCAL
+# 3. CONEXIÓN A BASE DE DATOS Y ESTADO LOCAL (CON DIAGNÓSTICO)
 # ==========================================
 @st.cache_resource
 def init_connection():
-    return create_engine(st.secrets["postgres"]["url"])
+    try:
+        db_url = st.secrets["postgres"]["url"]
+        engine_test = create_engine(db_url)
+        with engine_test.connect() as conn:
+            pass
+        return engine_test
+    except Exception as e:
+        st.error(f"⚠️ Error crítico de conexión a Supabase: {e}")
+        return None
 
 engine = init_connection()
 
 def cargar_datos_nube():
     """Intenta descargar la matriz y quirófanos desde PostgreSQL"""
+    if engine is None:
+        return None, None
     try:
         df_m = pd.read_sql("SELECT * FROM matriz_actual", con=engine, index_col='Fecha')
         df_q = pd.read_sql("SELECT * FROM quirofanos_actual", con=engine)
         return df_m, df_q
-    except:
+    except Exception as e:
         return None, None
 
 now = datetime.datetime.now()
@@ -375,17 +385,20 @@ with st.sidebar:
         st.caption("Comparte los datos con el resto del equipo en tiempo real.")
         
         if st.button("🚀 Guardar Todo en la Nube", type="primary", use_container_width=True):
-            try:
-                with st.spinner("Subiendo datos a PostgreSQL..."):
-                    df_mat = st.session_state.matrix_df.copy()
-                    df_mat.index.name = 'Fecha'
-                    
-                    df_mat.to_sql('matriz_actual', con=engine, if_exists='replace', index=True)
-                    st.session_state.quirofanos_df.to_sql('quirofanos_actual', con=engine, if_exists='replace', index=False)
-                    
-                st.success("✅ ¡Datos guardados en la nube exitosamente!")
-            except Exception as e:
-                st.error(f"Error al guardar en la nube: {e}")
+            if engine is None:
+                st.error("❌ No hay conexión activa con la base de datos.")
+            else:
+                try:
+                    with st.spinner("Subiendo datos a PostgreSQL..."):
+                        df_mat = st.session_state.matrix_df.copy()
+                        df_mat.index.name = 'Fecha'
+                        
+                        df_mat.to_sql('matriz_actual', con=engine, if_exists='replace', index=True)
+                        st.session_state.quirofanos_df.to_sql('quirofanos_actual', con=engine, if_exists='replace', index=False)
+                        
+                    st.success("✅ ¡Datos guardados en la nube exitosamente!")
+                except Exception as e:
+                    st.error(f"Error al guardar en la nube: {e}")
                 
         if st.button("🔄 Refrescar desde la Nube", use_container_width=True):
             df_m, df_q = cargar_datos_nube()
@@ -396,7 +409,7 @@ with st.sidebar:
                 st.success("✅ Datos descargados de la nube y actualizados.")
                 st.rerun()
             else:
-                st.warning("No hay datos guardados en la nube todavía.")
+                st.warning("No hay conexión o no hay datos guardados en la nube todavía.")
 
         st.divider()
         st.subheader("📂 Restaurar Sesión Local")
