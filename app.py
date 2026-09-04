@@ -3,6 +3,7 @@ import pandas as pd
 import datetime
 import calendar
 import re
+from sqlalchemy import create_engine
 
 # ==========================================
 # 0. CONFIGURACIÓN Y CONTROL DE ACCESO
@@ -43,7 +44,7 @@ def check_authentication():
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.subheader("🔒 Acceso Restringido - Cirugía General")
-        st.write("Introduce tus credenciales para acceder al sistema local:")
+        st.write("Introduce tus credenciales para acceder al sistema:")
         
         st.text_input("Usuario (Dejar en blanco si entras como Solo Lectura)", key="input_user", placeholder="Ej: jefe_servicio, secretaria_1...")
         st.text_input("Contraseña", type="password", key="input_pass", placeholder="Introduce tu clave...", on_change=process_login)
@@ -303,16 +304,37 @@ def limpiar_estado_q(fecha, docs):
                 st.session_state.matrix_df.at[fecha, doc] = est[:-4]
 
 # ==========================================
-# 3. INICIALIZACIÓN DE ESTADO LOCAL
+# 3. CONEXIÓN A BASE DE DATOS Y ESTADO LOCAL
 # ==========================================
+@st.cache_resource
+def init_connection():
+    return create_engine(st.secrets["postgres"]["url"])
+
+engine = init_connection()
+
+def cargar_datos_nube():
+    """Intenta descargar la matriz y quirófanos desde PostgreSQL"""
+    try:
+        df_m = pd.read_sql("SELECT * FROM matriz_actual", con=engine, index_col='Fecha')
+        df_q = pd.read_sql("SELECT * FROM quirofanos_actual", con=engine)
+        return df_m, df_q
+    except:
+        return None, None
+
 now = datetime.datetime.now()
+
 if 'matrix_df' not in st.session_state:
     st.session_state.current_year = now.year
     st.session_state.current_month = now.month
-    st.session_state.matrix_df = generate_base_matrix(now.year, now.month)
-
-if 'quirofanos_df' not in st.session_state:
-    st.session_state.quirofanos_df = pd.DataFrame(columns=["Fecha", "Unidad", "Grupo", "Quirófano", "Turno", "HC", "Equipo"])
+    
+    df_m, df_q = cargar_datos_nube()
+    
+    if df_m is not None and not df_m.empty:
+        st.session_state.matrix_df = df_m
+        st.session_state.quirofanos_df = df_q
+    else:
+        st.session_state.matrix_df = generate_base_matrix(now.year, now.month)
+        st.session_state.quirofanos_df = pd.DataFrame(columns=["Fecha", "Unidad", "Grupo", "Quirófano", "Turno", "HC", "Equipo"])
 
 if 'update_counter' not in st.session_state:
     st.session_state.update_counter = 0
@@ -347,10 +369,40 @@ with st.sidebar:
             st.success("Plantilla generada correctamente.")
             
         st.divider()
-        st.subheader("📂 Restaurar Sesión Anterior")
-        st.caption("Sube los archivos CSV que descargaste para continuar donde lo dejaste.")
         
-        uploaded_csv_matriz = st.file_uploader("1. Cargar Matriz Guardada (CSV)", type=["csv"], key="up_csv_mat")
+        # --- SECCIÓN DE LA NUBE (POSTGRESQL) ---
+        st.subheader("☁️ Sincronizar en la Nube")
+        st.caption("Comparte los datos con el resto del equipo en tiempo real.")
+        
+        if st.button("🚀 Guardar Todo en la Nube", type="primary", use_container_width=True):
+            try:
+                with st.spinner("Subiendo datos a PostgreSQL..."):
+                    df_mat = st.session_state.matrix_df.copy()
+                    df_mat.index.name = 'Fecha'
+                    
+                    df_mat.to_sql('matriz_actual', con=engine, if_exists='replace', index=True)
+                    st.session_state.quirofanos_df.to_sql('quirofanos_actual', con=engine, if_exists='replace', index=False)
+                    
+                st.success("✅ ¡Datos guardados en la nube exitosamente!")
+            except Exception as e:
+                st.error(f"Error al guardar en la nube: {e}")
+                
+        if st.button("🔄 Refrescar desde la Nube", use_container_width=True):
+            df_m, df_q = cargar_datos_nube()
+            if df_m is not None:
+                st.session_state.matrix_df = df_m
+                st.session_state.quirofanos_df = df_q
+                st.session_state.update_counter += 1
+                st.success("✅ Datos descargados de la nube y actualizados.")
+                st.rerun()
+            else:
+                st.warning("No hay datos guardados en la nube todavía.")
+
+        st.divider()
+        st.subheader("📂 Restaurar Sesión Local")
+        st.caption("Sube los archivos CSV locales (opcional).")
+        
+        uploaded_csv_matriz = st.file_uploader("1. Cargar Matriz Local (CSV)", type=["csv"], key="up_csv_mat")
         if uploaded_csv_matriz is not None and st.button("Restaurar Matriz", type="primary"):
             try:
                 df_cargado = pd.read_csv(uploaded_csv_matriz, index_col=0).fillna("") 
@@ -361,7 +413,7 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"Error al cargar la matriz: {e}")
                 
-        uploaded_csv_quiro = st.file_uploader("2. Cargar Quirófanos Guardados (CSV)", type=["csv"], key="up_csv_qui")
+        uploaded_csv_quiro = st.file_uploader("2. Cargar Quirófanos Local (CSV)", type=["csv"], key="up_csv_qui")
         if uploaded_csv_quiro is not None and st.button("Restaurar Quirófanos", type="primary"):
             try:
                 df_q_cargado = pd.read_csv(uploaded_csv_quiro)
@@ -373,7 +425,7 @@ with st.sidebar:
                 st.error(f"Error al cargar quirófanos: {e}")
         
         st.divider()
-        st.subheader("📥 Cargar Datos Diarios (Importar)")
+        st.subheader("📥 Cargar Datos Diarios (Importar Excel)")
 
         uploaded_guardias = st.file_uploader("1. Sube Guardias (.ods/.xlsx/.csv)", type=["ods", "xlsx", "csv"], key="up_guardias")
         if uploaded_guardias is not None and st.button("🚨 Importar Guardias"):
@@ -406,8 +458,8 @@ with st.sidebar:
                 st.error(f"Error: {e}")
                 
         st.divider()
-        st.subheader("💾 Guardar Datos (Exportar CSV)")
-        st.caption("Descarga tus datos al terminar para no perderlos.")
+        st.subheader("💾 Backup Local (Exportar CSV)")
+        st.caption("Descarga una copia de seguridad en tu ordenador.")
         
         csv_matrix = st.session_state.matrix_df.to_csv().encode('utf-8')
         st.download_button(
@@ -428,7 +480,7 @@ with st.sidebar:
         )
 
     else:
-        st.info("🔒 Los paneles de importación y exportación están desactivados en modo Solo Lectura.")
+        st.info("🔒 Los paneles de importación y edición están desactivados en modo Solo Lectura.")
 
 # ==========================================
 # 5. PANEL CENTRAL Y PESTAÑAS
@@ -486,7 +538,6 @@ with tab1:
     st.subheader("Registro de Quirófanos")
     st.dataframe(st.session_state.quirofanos_df, use_container_width=True, hide_index=True)
     
-    # --- SECCIÓN: MODIFICAR / SUSPENDER QUIRÓFANOS (Siempre visible en escritura) ---
     if modo_escritura:
         st.divider()
         st.subheader("⚙️ Modificar o Suspender Quirófano")
