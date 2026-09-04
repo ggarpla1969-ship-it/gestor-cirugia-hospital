@@ -4,6 +4,7 @@ from google.oauth2.service_account import Credentials
 
 st.title("☁️ Mi Aplicación en la Nube")
 
+# PEGA AQUÍ TU ENLACE REAL DE GOOGLE SHEETS ENTRE LAS COMILLAS
 URL_HOJA = "PEGA_AQUÍ_TU_ENLACE"
 
 try:
@@ -13,11 +14,13 @@ try:
     credentials = Credentials.from_service_account_info(cred_dict, scopes=scopes)
     gc = gspread.authorize(credentials)
     
-    # 2. Conectar y escribir
+    # 2. Conectar a la hoja y escribir un saludo
     hoja = gc.open_by_url(URL_HOJA)
     pestana = hoja.sheet1
+    pestana.update_acell('A1', '¡Hola desde Streamlit Cloud!')
     
-    st.success("✅ ¡Conectado a Google Sheets desde la nube!")
+    st.success("✅ ¡Conectado a Google Sheets desde la nube con éxito!")
+    st.info("🎉 Ve a tu Google Sheets y comprueba que ha aparecido el saludo en la celda A1.")
     
 except Exception as e:
     st.error("❌ Error de conexión:")
