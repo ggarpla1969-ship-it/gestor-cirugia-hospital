@@ -3,7 +3,8 @@ import pandas as pd
 import datetime
 import calendar
 import re
-from sqlalchemy import create_engine
+import base64
+import requests
 
 # ==========================================
 # 0. CONFIGURACIÓN Y CONTROL DE ACCESO
@@ -80,9 +81,49 @@ ALL_STATUSES = STATUSES + COMBO_Q + COMBO_G + COMBO_G_Q + ["Q + Q", "G + Q", "G 
 DIAS_SEMANA = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
 # ==========================================
-# 2. FUNCIONES DE LÓGICA Y PROCESAMIENTO
+# 2. FUNCIONES DE LÓGICA Y GITHUB SYNC
 # ==========================================
-def generate_base_matrix(year, month):
+def leer_archivo_github(filepath):
+    try:
+        gh_config = st.secrets["github"]
+        token = gh_config["token"]
+        repo = gh_config["repo"] # Formato: "usuario/nombre-repo"
+        url = f"https://api.github.com/repos/{repo}/contents/{filepath}"
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            file_content = response.json()
+            decoded = base64.b64decode(file_content["content"]).decode("utf-8")
+            return decoded, file_content["sha"]
+    except Exception as e:
+        pass
+    return None, None
+
+def guardar_archivo_github(filepath, content_str, commit_message):
+    try:
+        gh_config = st.secrets["github"]
+        token = gh_config["token"]
+        repo = gh_config["repo"]
+        url = f"https://api.github.com/repos/{repo}/contents/{filepath}"
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+        
+        # Obtener SHA actual si existe
+        _, sha = leer_archivo_github(filepath)
+        
+        encoded_content = base64.b64encode(content_str.encode("utf-8")).decode("utf-8")
+        payload = {
+            "message": commit_message,
+            "content": encoded_content
+        }
+        if sha:
+            payload["sha"] = sha
+            
+        response = requests.put(url, headers=headers, json=payload)
+        return response.status_code in [200, 201]
+    except Exception as e:
+        return False
+
+def generar_matriz_base(year, month):
     num_days = calendar.monthrange(year, month)[1]
     dates = [datetime.date(year, month, day) for day in range(1, num_days + 1)]
     df = pd.DataFrame(index=[f"{d.strftime('%d/%m/%Y')} ({DIAS_SEMANA[d.weekday()]})" for d in dates], columns=ALL_STAFF)
@@ -292,7 +333,6 @@ def process_ausencias_ods(uploaded_file, matrix_df):
     return matrix_df, actualizados, informe
 
 def limpiar_estado_q(fecha, docs):
-    """Elimina la 'Q' de la matriz para una lista de doctores y fecha dados"""
     for doc in docs:
         if doc in st.session_state.matrix_df.columns:
             est = str(st.session_state.matrix_df.at[fecha, doc]).strip()
@@ -304,31 +344,17 @@ def limpiar_estado_q(fecha, docs):
                 st.session_state.matrix_df.at[fecha, doc] = est[:-4]
 
 # ==========================================
-# 3. CONEXIÓN A BASE DE DATOS Y ESTADO LOCAL (CON DIAGNÓSTICO)
+# 3. CARGA DE DATOS DESDE GITHUB
 # ==========================================
-@st.cache_resource
-def init_connection():
-    try:
-        db_url = st.secrets["postgres"]["url"]
-        engine_test = create_engine(db_url)
-        with engine_test.connect() as conn:
-            pass
-        return engine_test
-    except Exception as e:
-        st.error(f"⚠️ Error crítico de conexión a Supabase: {e}")
-        return None
-
-engine = init_connection()
-
 def cargar_datos_nube():
-    """Intenta descargar la matriz y quirófanos desde PostgreSQL"""
-    if engine is None:
-        return None, None
     try:
-        df_m = pd.read_sql("SELECT * FROM matriz_actual", con=engine, index_col='Fecha')
-        df_q = pd.read_sql("SELECT * FROM quirofanos_actual", con=engine)
+        csv_m, _ = leer_archivo_github("data/matriz_actual.csv")
+        csv_q, _ = leer_archivo_github("data/quirofanos_actual.csv")
+        
+        df_m = pd.read_csv(pd.io.common.StringIO(csv_m), index_col=0) if csv_m else None
+        df_q = pd.read_csv(pd.io.common.StringIO(csv_q)) if csv_q else None
         return df_m, df_q
-    except Exception as e:
+    except Exception:
         return None, None
 
 now = datetime.datetime.now()
@@ -341,9 +367,9 @@ if 'matrix_df' not in st.session_state:
     
     if df_m is not None and not df_m.empty:
         st.session_state.matrix_df = df_m
-        st.session_state.quirofanos_df = df_q
+        st.session_state.quirofanos_df = df_q if df_q is not None else pd.DataFrame(columns=["Fecha", "Unidad", "Grupo", "Quirófano", "Turno", "HC", "Equipo"])
     else:
-        st.session_state.matrix_df = generate_base_matrix(now.year, now.month)
+        st.session_state.matrix_df = generar_matriz_base(now.year, now.month)
         st.session_state.quirofanos_df = pd.DataFrame(columns=["Fecha", "Unidad", "Grupo", "Quirófano", "Turno", "HC", "Equipo"])
 
 if 'update_counter' not in st.session_state:
@@ -374,126 +400,111 @@ with st.sidebar:
     
     if modo_escritura:
         if st.button("Generar Plantilla Mensual"):
-            st.session_state.matrix_df = generate_base_matrix(selected_year, selected_month)
+            st.session_state.matrix_df = generar_matriz_base(selected_year, selected_month)
             st.session_state.update_counter += 1
             st.success("Plantilla generada correctamente.")
             
         st.divider()
         
-        # --- SECCIÓN DE LA NUBE (POSTGRESQL) ---
+        # --- SECCIÓN DE SINCRONIZACIÓN EN GITHUB ---
         st.subheader("☁️ Sincronizar en la Nube")
-        st.caption("Comparte los datos con el resto del equipo en tiempo real.")
+        st.caption("Guarda los datos de forma segura en tu repositorio de GitHub.")
         
         if st.button("🚀 Guardar Todo en la Nube", type="primary", use_container_width=True):
-            if engine is None:
-                st.error("❌ No hay conexión activa con la base de datos.")
-            else:
-                try:
-                    with st.spinner("Subiendo datos a PostgreSQL..."):
-                        df_mat = st.session_state.matrix_df.copy()
-                        df_mat.index.name = 'Fecha'
-                        
-                        df_mat.to_sql('matriz_actual', con=engine, if_exists='replace', index=True)
-                        st.session_state.quirofanos_df.to_sql('quirofanos_actual', con=engine, if_exists='replace', index=False)
-                        
-                    st.success("✅ ¡Datos guardados en la nube exitosamente!")
-                except Exception as e:
-                    st.error(f"Error al guardar en la nube: {e}")
+            try:
+                with st.spinner("Guardando en GitHub..."):
+                    csv_m = st.session_state.matrix_df.to_csv()
+                    csv_q = st.session_state.quirofanos_df.to_csv(index=False)
+                    
+                    ok_m = guardar_archivo_github("data/matriz_actual.csv", csv_m, "Actualización matriz desde app")
+                    ok_q = guardar_archivo_github("data/quirofanos_actual.csv", csv_q, "Actualización quirófanos desde app")
+                    
+                if ok_m and ok_q:
+                    st.success("✅ ¡Datos guardados en GitHub con éxito!")
+                else:
+                    st.error("⚠️ Error al guardar en GitHub. Revisa el token en los Secrets.")
+            except Exception as e:
+                st.error(f"Error: {e}")
                 
         if st.button("🔄 Refrescar desde la Nube", use_container_width=True):
             df_m, df_q = cargar_datos_nube()
             if df_m is not None:
                 st.session_state.matrix_df = df_m
-                st.session_state.quirofanos_df = df_q
+                if df_q is not None:
+                    st.session_state.quirofanos_df = df_q
                 st.session_state.update_counter += 1
-                st.success("✅ Datos descargados de la nube y actualizados.")
+                st.success("✅ Datos recargados desde GitHub.")
                 st.rerun()
             else:
-                st.warning("No hay conexión o no hay datos guardados en la nube todavía.")
+                st.warning("No se encontraron archivos en GitHub todavía.")
 
         st.divider()
-        st.subheader("📂 Restaurar Sesión Local")
-        st.caption("Sube los archivos CSV locales (opcional).")
-        
-        uploaded_csv_matriz = st.file_uploader("1. Cargar Matriz Local (CSV)", type=["csv"], key="up_csv_mat")
+        st.subheader("📂 Restaurar Local")
+        uploaded_csv_matriz = st.file_uploader("Matriz Local (CSV)", type=["csv"], key="up_csv_mat")
         if uploaded_csv_matriz is not None and st.button("Restaurar Matriz", type="primary"):
             try:
                 df_cargado = pd.read_csv(uploaded_csv_matriz, index_col=0).fillna("") 
                 st.session_state.matrix_df = df_cargado
                 st.session_state.update_counter += 1
-                st.success("✅ Matriz restaurada con éxito.")
+                st.success("✅ Matriz restaurada.")
                 st.rerun()
             except Exception as e:
-                st.error(f"Error al cargar la matriz: {e}")
+                st.error(f"Error: {e}")
                 
-        uploaded_csv_quiro = st.file_uploader("2. Cargar Quirófanos Local (CSV)", type=["csv"], key="up_csv_qui")
+        uploaded_csv_quiro = st.file_uploader("Quirófanos Local (CSV)", type=["csv"], key="up_csv_qui")
         if uploaded_csv_quiro is not None and st.button("Restaurar Quirófanos", type="primary"):
             try:
                 df_q_cargado = pd.read_csv(uploaded_csv_quiro)
                 st.session_state.quirofanos_df = df_q_cargado
                 st.session_state.update_counter += 1
-                st.success("✅ Quirófanos restaurados con éxito.")
+                st.success("✅ Quirófanos restaurados.")
                 st.rerun()
             except Exception as e:
-                st.error(f"Error al cargar quirófanos: {e}")
+                st.error(f"Error: {e}")
         
         st.divider()
-        st.subheader("📥 Cargar Datos Diarios (Importar Excel)")
+        st.subheader("📥 Importar Excel")
 
-        uploaded_guardias = st.file_uploader("1. Sube Guardias (.ods/.xlsx/.csv)", type=["ods", "xlsx", "csv"], key="up_guardias")
+        uploaded_guardias = st.file_uploader("Guardias (.ods/.xlsx/.csv)", type=["ods", "xlsx", "csv"], key="up_guardias")
         if uploaded_guardias is not None and st.button("🚨 Importar Guardias"):
             try:
                 matriz_actualizada, count, informe = process_guardias_ods(uploaded_guardias, st.session_state.matrix_df)
                 st.session_state.matrix_df = matriz_actualizada
                 st.session_state.update_counter += 1
-                st.success(f"✅ ¡Guardias importadas con éxito! ({count})")
+                st.success(f"✅ ¡Guardias importadas! ({count})")
             except Exception as e:
                 st.error(f"Error: {e}")
 
-        uploaded_consultas = st.file_uploader("2. Sube Consultas (.ods/.xlsx/.csv)", type=["ods", "xlsx", "csv"], key="up_consultas")
+        uploaded_consultas = st.file_uploader("Consultas (.ods/.xlsx/.csv)", type=["ods", "xlsx", "csv"], key="up_consultas")
         if uploaded_consultas is not None and st.button("🩺 Importar Consultas"):
             try:
                 matriz_actualizada, count, informe = process_consultas_ods(uploaded_consultas, st.session_state.matrix_df)
                 st.session_state.matrix_df = matriz_actualizada
                 st.session_state.update_counter += 1
-                st.success(f"✅ ¡Consultas importadas con éxito! ({count})")
+                st.success(f"✅ ¡Consultas importadas! ({count})")
             except Exception as e:
                 st.error(f"Error: {e}")
 
-        uploaded_ausencias = st.file_uploader("3. Sube Ausencias (.ods/.xlsx/.csv)", type=["ods", "xlsx", "csv"], key="up_ausencias")
+        uploaded_ausencias = st.file_uploader("Ausencias (.ods/.xlsx/.csv)", type=["ods", "xlsx", "csv"], key="up_ausencias")
         if uploaded_ausencias is not None and st.button("🌴 Importar Ausencias"):
             try:
                 matriz_actualizada, count, informe = process_ausencias_ods(uploaded_ausencias, st.session_state.matrix_df)
                 st.session_state.matrix_df = matriz_actualizada
                 st.session_state.update_counter += 1
-                st.success("✅ ¡Ausencias importadas con éxito!")
+                st.success("✅ ¡Ausencias importadas!")
             except Exception as e:
                 st.error(f"Error: {e}")
                 
         st.divider()
-        st.subheader("💾 Backup Local (Exportar CSV)")
-        st.caption("Descarga una copia de seguridad en tu ordenador.")
-        
+        st.subheader("💾 Backup Local")
         csv_matrix = st.session_state.matrix_df.to_csv().encode('utf-8')
-        st.download_button(
-            label="📥 Descargar Matriz (CSV)",
-            data=csv_matrix,
-            file_name=f"matriz_cirugia_{selected_year}_{selected_month:02d}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
+        st.download_button(label="📥 Descargar Matriz (CSV)", data=csv_matrix, file_name=f"matriz_{selected_year}_{selected_month:02d}.csv", mime="text/csv", use_container_width=True)
         
         csv_quirofanos = st.session_state.quirofanos_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Descargar Quirófanos (CSV)",
-            data=csv_quirofanos,
-            file_name=f"quirofanos_cirugia_{selected_year}_{selected_month:02d}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
+        st.download_button(label="📥 Descargar Quirófanos (CSV)", data=csv_quirofanos, file_name=f"quirofanos_{selected_year}_{selected_month:02d}.csv", mime="text/csv", use_container_width=True)
 
     else:
-        st.info("🔒 Los paneles de importación y edición están desactivados en modo Solo Lectura.")
+        st.info("🔒 Paneles de importación desactivados en Solo Lectura.")
 
 # ==========================================
 # 5. PANEL CENTRAL Y PESTAÑAS
@@ -556,7 +567,7 @@ with tab1:
         st.subheader("⚙️ Modificar o Suspender Quirófano")
         
         if st.session_state.quirofanos_df.empty:
-            st.info("ℹ️ No hay ningún quirófano registrado todavía. Asigna uno arriba para poder modificarlo o suspenderlo.")
+            st.info("ℹ️ No hay ningún quirófano registrado todavía.")
         else:
             q_opciones = []
             for idx, row in st.session_state.quirofanos_df.iterrows():
@@ -582,10 +593,8 @@ with tab1:
                 with col_mod:
                     with st.expander("✏️ Modificar HC o Equipo"):
                         new_hc = st.text_input("Nuevo Nº HC", value=row_sel['HC'], key="mod_hc")
-                        
                         eq_actual_adj = [doc for doc in SURGEONS if doc in str(row_sel['Equipo'])]
                         eq_actual_res = [doc for doc in RESIDENTS if doc in str(row_sel['Equipo'])]
-                        
                         new_adj = st.multiselect("Nuevos Adjuntos", SURGEONS, default=eq_actual_adj, key="mod_adj")
                         new_res = st.multiselect("Nuevos Residentes", RESIDENTS, default=eq_actual_res, key="mod_res")
                         
@@ -593,11 +602,9 @@ with tab1:
                             equipo_antiguo = [x.strip() for x in str(row_sel['Equipo']).split(",") if x.strip()]
                             fecha_antigua = row_sel['Fecha']
                             limpiar_estado_q(fecha_antigua, equipo_antiguo)
-                            
                             nuevo_equipo = new_adj + new_res
                             st.session_state.quirofanos_df.at[idx_sel, 'HC'] = new_hc
                             st.session_state.quirofanos_df.at[idx_sel, 'Equipo'] = ", ".join(nuevo_equipo)
-                            
                             for p in nuevo_equipo:
                                 est = str(st.session_state.matrix_df.at[fecha_antigua, p]).strip()
                                 if est in ["Libre", "none", ""]: 
@@ -606,9 +613,8 @@ with tab1:
                                     st.session_state.matrix_df.at[fecha_antigua, p] = "Q + Q"
                                 elif "Q" not in est: 
                                     st.session_state.matrix_df.at[fecha_antigua, p] = f"{est} + Q"
-                                    
                             st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
-                            st.success("Quirófano actualizado correctamente.")
+                            st.success("Quirófano actualizado.")
                             st.rerun()
 
 with tab2:
@@ -621,9 +627,7 @@ with tab2:
         edited_adj = st.data_editor(
             df_adjuntos.style.apply(lambda x: style_matrix(df_adjuntos), axis=None), 
             column_config={col: st.column_config.SelectboxColumn(options=ALL_STATUSES, required=False) for col in SURGEONS}, 
-            use_container_width=True, 
-            height=600, 
-            key=f"ed_adj_{st.session_state.update_counter}"
+            use_container_width=True, height=600, key=f"ed_adj_{st.session_state.update_counter}"
         )
     else:
         st.dataframe(df_adjuntos.style.apply(lambda x: style_matrix(df_adjuntos), axis=None), use_container_width=True, height=600)
@@ -634,9 +638,7 @@ with tab2:
         edited_res = st.data_editor(
             df_residentes.style.apply(lambda x: style_matrix(df_residentes), axis=None), 
             column_config={col: st.column_config.SelectboxColumn(options=ALL_STATUSES, required=False) for col in RESIDENTS}, 
-            use_container_width=True, 
-            height=600, 
-            key=f"ed_res_{st.session_state.update_counter}"
+            use_container_width=True, height=600, key=f"ed_res_{st.session_state.update_counter}"
         )
         combined_df = pd.concat([edited_adj, edited_res], axis=1)[ALL_STAFF]
         processed_df = apply_guardia_rules(combined_df.copy())
@@ -647,23 +649,19 @@ with tab2:
 
 with tab3:
     st.header("📋 Resumen y Disponibilidad")
-    
     st.markdown("### **<u>A) LISTADO DE DISPONIBLE ELIGIENDO LA FECHA</u>**", unsafe_allow_html=True)
     disp_date = st.selectbox("Selecciona la fecha:", st.session_state.matrix_df.index, key="sel_disp_date")
     if disp_date:
         disponibles = [staff for staff, estado in st.session_state.matrix_df.loc[disp_date].items() if str(estado) == "Libre"]
-        if disponibles: 
-            st.success(f"**Personal disponible el {disp_date}:** " + ", ".join(disponibles))
-        else: 
-            st.warning("Sin personal Libre en esta fecha.")
+        if disponibles: st.success(f"**Personal disponible el {disp_date}:** " + ", ".join(disponibles))
+        else: st.warning("Sin personal Libre.")
             
     st.divider()
     st.markdown("### **<u>B) LISTADO DE QUIRÓFANOS POR FECHAS DEL MES</u>**", unsafe_allow_html=True)
     q_df = st.session_state.quirofanos_df
     if not q_df.empty:
         st.dataframe(q_df.sort_values(by=["Fecha", "Unidad", "Grupo", "Turno", "Quirófano"]), hide_index=True, use_container_width=True)
-    else: 
-        st.info("Sin quirófanos programados actualmente.")
+    else: st.info("Sin quirófanos programados.")
     
     st.divider()
     st.markdown("### **<u>C) LISTADO DE GUARDIAS DE ADJUNTOS Y RESIDENTES</u>**", unsafe_allow_html=True)
@@ -688,15 +686,10 @@ with tab3:
         }
         for celda in st.session_state.matrix_df[profesional]:
             celda_str = str(celda).strip().upper()
-            if celda_str in ["", "NONE", "LIBRE", "NAN"]: 
-                continue
+            if celda_str in ["", "NONE", "LIBRE", "NAN"]: continue
             for parte in [p.strip() for p in celda_str.split("+")]:
-                if parte.startswith("G"): 
-                    conteo["G"] += 1
-                elif parte in conteo: 
-                    conteo[parte] += 1
+                if parte.startswith("G"): conteo["G"] += 1
+                elif parte in conteo: conteo[parte] += 1
         resumen_prof_df = pd.DataFrame(list(conteo.items()), columns=["Actividad", "Total Días / Turnos en el Mes"]).query("`Total Días / Turnos en el Mes` > 0")
-        if not resumen_prof_df.empty: 
-            st.dataframe(resumen_prof_df, hide_index=True, use_container_width=True)
-        else: 
-            st.info(f"{profesional} sin actividad especial registrada este mes.")
+        if not resumen_prof_df.empty: st.dataframe(resumen_prof_df, hide_index=True, use_container_width=True)
+        else: st.info(f"{profesional} sin actividad especial registrada este mes.")
