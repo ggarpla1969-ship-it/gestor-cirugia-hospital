@@ -5,7 +5,7 @@ from google.oauth2.service_account import Credentials
 st.title("☁️ Mi Aplicación en la Nube")
 
 # PEGA AQUÍ TU ENLACE REAL DE GOOGLE SHEETS ENTRE LAS COMILLAS
-URL_HOJA = "PEGA_AQUÍ_TU_ENLACE"
+URL_HOJA = "https://drive.google.com/drive/folders/1QsFTzChtJvQto_Y7Au9jgwDULwNf2RU4"
 
 try:
     # 1. Cargar las credenciales desde la caja fuerte de Streamlit Cloud
