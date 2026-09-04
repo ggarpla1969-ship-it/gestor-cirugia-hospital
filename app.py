@@ -486,70 +486,66 @@ with tab1:
     st.subheader("Registro de Quirófanos")
     st.dataframe(st.session_state.quirofanos_df, use_container_width=True, hide_index=True)
     
-    # --- NUEVA SECCIÓN: MODIFICAR / SUSPENDER QUIRÓFANOS ---
-    if modo_escritura and not st.session_state.quirofanos_df.empty:
+    # --- SECCIÓN: MODIFICAR / SUSPENDER QUIRÓFANOS (Siempre visible en escritura) ---
+    if modo_escritura:
         st.divider()
         st.subheader("⚙️ Modificar o Suspender Quirófano")
         
-        # Generar lista de opciones para el selector
-        q_opciones = []
-        for idx, row in st.session_state.quirofanos_df.iterrows():
-            q_opciones.append(f"[{idx}] {row['Fecha']} | {row['Unidad']} | {row['Quirófano']} ({row['Turno']}) - Eq: {row['Equipo']}")
+        if st.session_state.quirofanos_df.empty:
+            st.info("ℹ️ No hay ningún quirófano registrado todavía. Asigna uno arriba para poder modificarlo o suspenderlo.")
+        else:
+            q_opciones = []
+            for idx, row in st.session_state.quirofanos_df.iterrows():
+                q_opciones.append(f"[{idx}] {row['Fecha']} | {row['Unidad']} | {row['Quirófano']} ({row['Turno']}) - Eq: {row['Equipo']}")
+                
+            q_sel = st.selectbox("Selecciona un quirófano programado:", ["(Ninguno)"] + q_opciones)
             
-        q_sel = st.selectbox("Selecciona un quirófano programado:", ["(Ninguno)"] + q_opciones)
-        
-        if q_sel != "(Ninguno)":
-            idx_sel = int(q_sel.split("]")[0].replace("[", ""))
-            row_sel = st.session_state.quirofanos_df.loc[idx_sel]
-            
-            col_elim, col_mod = st.columns(2)
-            
-            with col_elim:
-                if st.button("🗑️ Suspender / Eliminar", type="primary", use_container_width=True):
-                    # 1. Quitar 'Q' de la matriz
-                    equipo_antiguo = [x.strip() for x in str(row_sel['Equipo']).split(",") if x.strip()]
-                    limpiar_estado_q(row_sel['Fecha'], equipo_antiguo)
-                    
-                    # 2. Borrar la fila del dataframe
-                    st.session_state.quirofanos_df = st.session_state.quirofanos_df.drop(idx_sel).reset_index(drop=True)
-                    st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
-                    st.success("Quirófano suspendido y matriz liberada.")
-                    st.rerun()
-                    
-            with col_mod:
-                with st.expander("✏️ Modificar HC o Equipo"):
-                    new_hc = st.text_input("Nuevo Nº HC", value=row_sel['HC'], key="mod_hc")
-                    
-                    eq_actual_adj = [doc for doc in SURGEONS if doc in str(row_sel['Equipo'])]
-                    eq_actual_res = [doc for doc in RESIDENTS if doc in str(row_sel['Equipo'])]
-                    
-                    new_adj = st.multiselect("Nuevos Adjuntos", SURGEONS, default=eq_actual_adj, key="mod_adj")
-                    new_res = st.multiselect("Nuevos Residentes", RESIDENTS, default=eq_actual_res, key="mod_res")
-                    
-                    if st.button("Guardar Cambios de Equipo"):
-                        # 1. Limpiar equipo antiguo de la matriz
+            if q_sel != "(Ninguno)":
+                idx_sel = int(q_sel.split("]")[0].replace("[", ""))
+                row_sel = st.session_state.quirofanos_df.loc[idx_sel]
+                
+                col_elim, col_mod = st.columns(2)
+                
+                with col_elim:
+                    if st.button("🗑️ Suspender / Eliminar Quirófano", type="primary", use_container_width=True):
                         equipo_antiguo = [x.strip() for x in str(row_sel['Equipo']).split(",") if x.strip()]
-                        fecha_antigua = row_sel['Fecha']
-                        limpiar_estado_q(fecha_antigua, equipo_antiguo)
-                        
-                        # 2. Actualizar DataFrame
-                        nuevo_equipo = new_adj + new_res
-                        st.session_state.quirofanos_df.at[idx_sel, 'HC'] = new_hc
-                        st.session_state.quirofanos_df.at[idx_sel, 'Equipo'] = ", ".join(nuevo_equipo)
-                        
-                        # 3. Aplicar nueva 'Q' al nuevo equipo
-                        for p in nuevo_equipo:
-                            est = str(st.session_state.matrix_df.at[fecha_antigua, p]).strip()
-                            if est in ["Libre", "none", ""]: 
-                                st.session_state.matrix_df.at[fecha_antigua, p] = "Q"
-                            elif est == "Q": 
-                                st.session_state.matrix_df.at[fecha_antigua, p] = "Q + Q"
-                            elif "Q" not in est: 
-                                st.session_state.matrix_df.at[fecha_antigua, p] = f"{est} + Q"
-                                
+                        limpiar_estado_q(row_sel['Fecha'], equipo_antiguo)
+                        st.session_state.quirofanos_df = st.session_state.quirofanos_df.drop(idx_sel).reset_index(drop=True)
                         st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
-                        st.success("Quirófano actualizado correctamente.")
+                        st.success("Quirófano suspendido y matriz liberada.")
                         st.rerun()
+                        
+                with col_mod:
+                    with st.expander("✏️ Modificar HC o Equipo"):
+                        new_hc = st.text_input("Nuevo Nº HC", value=row_sel['HC'], key="mod_hc")
+                        
+                        eq_actual_adj = [doc for doc in SURGEONS if doc in str(row_sel['Equipo'])]
+                        eq_actual_res = [doc for doc in RESIDENTS if doc in str(row_sel['Equipo'])]
+                        
+                        new_adj = st.multiselect("Nuevos Adjuntos", SURGEONS, default=eq_actual_adj, key="mod_adj")
+                        new_res = st.multiselect("Nuevos Residentes", RESIDENTS, default=eq_actual_res, key="mod_res")
+                        
+                        if st.button("Guardar Cambios de Equipo"):
+                            equipo_antiguo = [x.strip() for x in str(row_sel['Equipo']).split(",") if x.strip()]
+                            fecha_antigua = row_sel['Fecha']
+                            limpiar_estado_q(fecha_antigua, equipo_antiguo)
+                            
+                            nuevo_equipo = new_adj + new_res
+                            st.session_state.quirofanos_df.at[idx_sel, 'HC'] = new_hc
+                            st.session_state.quirofanos_df.at[idx_sel, 'Equipo'] = ", ".join(nuevo_equipo)
+                            
+                            for p in nuevo_equipo:
+                                est = str(st.session_state.matrix_df.at[fecha_antigua, p]).strip()
+                                if est in ["Libre", "none", ""]: 
+                                    st.session_state.matrix_df.at[fecha_antigua, p] = "Q"
+                                elif est == "Q": 
+                                    st.session_state.matrix_df.at[fecha_antigua, p] = "Q + Q"
+                                elif "Q" not in est: 
+                                    st.session_state.matrix_df.at[fecha_antigua, p] = f"{est} + Q"
+                                    
+                            st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
+                            st.success("Quirófano actualizado correctamente.")
+                            st.rerun()
 
 with tab2:
     st.header("Matriz de Personal")
