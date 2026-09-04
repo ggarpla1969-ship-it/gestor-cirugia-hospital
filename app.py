@@ -333,12 +333,42 @@ with st.sidebar:
             st.session_state.matrix_df = generate_base_matrix(selected_year, selected_month)
             st.session_state.update_counter += 1
             st.success("Plantilla generada correctamente.")
+            
+        st.divider()
+        st.subheader("📂 Restaurar Sesión Anterior")
+        st.caption("Sube los archivos CSV que descargaste para continuar donde lo dejaste.")
+        
+        # Subir Matriz
+        uploaded_csv_matriz = st.file_uploader("1. Cargar Matriz Guardada (CSV)", type=["csv"], key="up_csv_mat")
+        if uploaded_csv_matriz is not None and st.button("Restaurar Matriz", type="primary"):
+            try:
+                df_cargado = pd.read_csv(uploaded_csv_matriz, index_col=0) # Asume que la primera columna son las fechas
+                # Para evitar problemas de tipos de datos, convertimos todo a string y limpiamos nans
+                df_cargado = df_cargado.fillna("") 
+                st.session_state.matrix_df = df_cargado
+                st.session_state.update_counter += 1
+                st.success("✅ Matriz restaurada con éxito.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error al cargar la matriz: {e}")
+                
+        # Subir Quirófanos
+        uploaded_csv_quiro = st.file_uploader("2. Cargar Quirófanos Guardados (CSV)", type=["csv"], key="up_csv_qui")
+        if uploaded_csv_quiro is not None and st.button("Restaurar Quirófanos", type="primary"):
+            try:
+                df_q_cargado = pd.read_csv(uploaded_csv_quiro)
+                st.session_state.quirofanos_df = df_q_cargado
+                st.session_state.update_counter += 1
+                st.success("✅ Quirófanos restaurados con éxito.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error al cargar quirófanos: {e}")
         
         st.divider()
-        st.subheader("📥 Cargar Datos (Importar)")
+        st.subheader("📥 Cargar Datos Diarios (Importar)")
 
         uploaded_guardias = st.file_uploader("1. Sube Guardias (.ods/.xlsx/.csv)", type=["ods", "xlsx", "csv"], key="up_guardias")
-        if uploaded_guardias is not None and st.button("🚨 Importar Guardias", type="primary"):
+        if uploaded_guardias is not None and st.button("🚨 Importar Guardias"):
             try:
                 matriz_actualizada, count, informe = process_guardias_ods(uploaded_guardias, st.session_state.matrix_df)
                 st.session_state.matrix_df = matriz_actualizada
@@ -348,7 +378,7 @@ with st.sidebar:
                 st.error(f"Error: {e}")
 
         uploaded_consultas = st.file_uploader("2. Sube Consultas (.ods/.xlsx/.csv)", type=["ods", "xlsx", "csv"], key="up_consultas")
-        if uploaded_consultas is not None and st.button("🩺 Importar Consultas", type="primary"):
+        if uploaded_consultas is not None and st.button("🩺 Importar Consultas"):
             try:
                 matriz_actualizada, count, informe = process_consultas_ods(uploaded_consultas, st.session_state.matrix_df)
                 st.session_state.matrix_df = matriz_actualizada
@@ -358,7 +388,7 @@ with st.sidebar:
                 st.error(f"Error: {e}")
 
         uploaded_ausencias = st.file_uploader("3. Sube Ausencias (.ods/.xlsx/.csv)", type=["ods", "xlsx", "csv"], key="up_ausencias")
-        if uploaded_ausencias is not None and st.button("🌴 Importar Ausencias", type="primary"):
+        if uploaded_ausencias is not None and st.button("🌴 Importar Ausencias"):
             try:
                 matriz_actualizada, count, informe = process_ausencias_ods(uploaded_ausencias, st.session_state.matrix_df)
                 st.session_state.matrix_df = matriz_actualizada
@@ -369,7 +399,7 @@ with st.sidebar:
                 
         st.divider()
         st.subheader("💾 Guardar Datos (Exportar CSV)")
-        st.caption("Al no usar la nube, descarga tus datos para no perderlos al cerrar.")
+        st.caption("Descarga tus datos al terminar para no perderlos.")
         
         csv_matrix = st.session_state.matrix_df.to_csv().encode('utf-8')
         st.download_button(
