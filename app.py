@@ -127,7 +127,8 @@ def apply_guardia_rules(df):
     return df
 
 def validar_incompatibilidades(fecha, equipo):
-    incompatibles = ["C. HOS M.", "C. HOS T.", "C.VEC.", "C.TELD.", "C.PRUD. 1", "C.PRUD. 2", "SG", "VAC", "BAJA"]
+    # Palabras clave o fragmentos que indican que el médico está ocupado en consulta o SG/ausente
+    incompatibles = ["C. HOS", "C.VEC", "C.TELD", "C.PRUD", "SG", "VAC", "BAJA"]
     conflictos = []
     
     for p in equipo:
