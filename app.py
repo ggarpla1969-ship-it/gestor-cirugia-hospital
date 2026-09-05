@@ -693,7 +693,7 @@ with tab3:
         {
             "Fecha": idx, 
             "Adjuntos de Guardia": ", ".join([p for p in SURGEONS if str(row[p]).strip().upper().startswith("G")]), 
-            "Residentes de Guardia": ", ".join([p for p in RESIDENTS if str(row[p]).strip().upper().startswith("G")])
+            "Residentes de Guardia": ", ".join([p for p in RESIDENTRES if str(row[p]).strip().upper().startswith("G")]) if 'RESIDENTRES' in globals() else ", ".join([p for p in RESIDENTS if str(row[p]).strip().upper().startswith("G")])
         } 
         for idx, row in st.session_state.matrix_df.iterrows()
     ]
@@ -714,6 +714,12 @@ with tab3:
             for parte in [p.strip() for p in celda_str.split("+")]:
                 if parte.startswith("G"): conteo["G"] += 1
                 elif parte in conteo: conteo[parte] += 1
-        resumen_prof_df = pd.DataFrame(list(conteo.items()), columns=["Actividad", "Total Días / Turnos en cái Mes"]).query("`Total Días / Turnos en el Mes` > 0")
-        if not resumen_prof_df.empty: st.dataframe(resumen_prof_df, hide_index=True, use_container_width=True)
-        else: st.info(f"{profesional} sin actividad especial registrada este mes.")
+        
+        # Solución limpia sin query para evitar errores de sintaxis o acentos
+        resumen_prof_df = pd.DataFrame(list(conteo.items()), columns=["Actividad", "Total Días / Turnos en el Mes"])
+        resumen_prof_df = resumen_prof_df[resumen_prof_df["Total Días / Turnos en el Mes"] > 0]
+        
+        if not resumen_prof_df.empty: 
+            st.dataframe(resumen_prof_df, hide_index=True, use_container_width=True)
+        else: 
+            st.info(f"{profesional} sin actividad especial registrada este mes.")
