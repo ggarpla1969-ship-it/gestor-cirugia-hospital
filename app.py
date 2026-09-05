@@ -150,7 +150,7 @@ def sincronizar_con_github_gitpython(ruta_csv="datos_cirugia.csv"):
 def generar_matriz_base(year, month):
     num_days = calendar.monthrange(year, month)[1]
     dates = [datetime.date(year, month, day) for day in range(1, num_days + 1)]
-    df = pd.DataFrame(index=[f"{d.strftime('%d/%m/%Y')} ({DIAS_SEMANA[d.weekday()])}" for d in dates], columns=ALL_STAFF)
+    df = pd.DataFrame(index=[f"{d.strftime('%d/%m/%Y')} ({DIAS_SEMANA[d.weekday()]})" for d in dates], columns=ALL_STAFF)
     
     for i, date_obj in enumerate(dates):
         weekday = date_obj.weekday()
@@ -714,6 +714,6 @@ with tab3:
             for parte in [p.strip() for p in celda_str.split("+")]:
                 if parte.startswith("G"): conteo["G"] += 1
                 elif parte in conteo: conteo[parte] += 1
-        resumen_prof_df = pd.DataFrame(list(conteo.items()), columns=["Actividad", "Total Días / Turnos en el Mes"]).query("`Total Días / Turnos en el Mes` > 0")
+        resumen_prof_df = pd.DataFrame(list(conteo.items()), columns=["Actividad", "Total Días / Turnos en cái Mes"]).query("`Total Días / Turnos en el Mes` > 0")
         if not resumen_prof_df.empty: st.dataframe(resumen_prof_df, hide_index=True, use_container_width=True)
         else: st.info(f"{profesional} sin actividad especial registrada este mes.")
