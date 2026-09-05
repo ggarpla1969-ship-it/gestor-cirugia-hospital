@@ -89,7 +89,7 @@ def leer_archivo_github(filepath):
     try:
         gh_config = st.secrets["github"]
         token = gh_config["token"]
-        repo = gh_config["repo"] # Formato: "usuario/nombre-repo"
+        repo = gh_config["repo"]
         url = f"https://api.github.com/repos/{repo}/contents/{filepath}"
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
         response = requests.get(url, headers=headers)
@@ -109,7 +109,6 @@ def guardar_archivo_github(filepath, content_str, commit_message):
         url = f"https://api.github.com/repos/{repo}/contents/{filepath}"
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
         
-        # Obtener SHA actual si existe
         _, sha = leer_archivo_github(filepath)
         
         encoded_content = base64.b64encode(content_str.encode("utf-8")).decode("utf-8")
@@ -122,28 +121,6 @@ def guardar_archivo_github(filepath, content_str, commit_message):
             
         response = requests.put(url, headers=headers, json=payload)
         return response.status_code in [200, 201]
-    except Exception as e:
-        return False
-
-def sincronizar_con_github_gitpython(ruta_csv="datos_cirugia.csv"):
-    try:
-        os.system('git config --global user.email "gestor-hospital@streamlit.app"')
-        os.system('git config --global user.name "Gestor Cirugia Bot"')
-
-        repo_path = "."
-        repo = git.Repo(repo_path)
-        
-        repo.index.add([ruta_csv])
-        repo.index.commit("Actualización automática de datos desde Streamlit")
-        
-        token = st.secrets["github"]["token"]
-        repo_url = f"https://{token}@github.com/ggarpla1969-ship-it/gestor-cirugia-local-hospital.git"
-        
-        origin = repo.remote(name='origin')
-        origin.set_url(repo_url)
-        origin.push('main')
-        
-        return True
     except Exception as e:
         return False
 
@@ -368,12 +345,12 @@ def limpiar_estado_q(fecha, docs):
                 st.session_state.matrix_df.at[fecha, doc] = est[:-4]
 
 # ==========================================
-# 3. CARGA DE DATOS DESDE GITHUB
+# 3. CARGA DE DATOS DESDE GITHUB (RAÍZ)
 # ==========================================
 def cargar_datos_nube():
     try:
-        csv_m, _ = leer_archivo_github("data/matriz_actual.csv")
-        csv_q, _ = leer_archivo_github("data/quirofanos_actual.csv")
+        csv_m, _ = leer_archivo_github("matriz_actual.csv")
+        csv_q, _ = leer_archivo_github("quirofanos_actual.csv")
         
         df_m = pd.read_csv(pd.io.common.StringIO(csv_m), index_col=0) if csv_m else None
         df_q = pd.read_csv(pd.io.common.StringIO(csv_q)) if csv_q else None
@@ -440,13 +417,13 @@ with st.sidebar:
                     csv_m = st.session_state.matrix_df.to_csv()
                     csv_q = st.session_state.quirofanos_df.to_csv(index=False)
                     
-                    ok_m = guardar_archivo_github("data/matriz_actual.csv", csv_m, "Actualización matriz desde app")
-                    ok_q = guardar_archivo_github("data/quirofanos_actual.csv", csv_q, "Actualización quirófanos desde app")
+                    ok_m = guardar_archivo_github("matriz_actual.csv", csv_m, "Actualización matriz desde app")
+                    ok_q = guardar_archivo_github("quirofanos_actual.csv", csv_q, "Actualización quirófanos desde app")
                     
                 if ok_m and ok_q:
                     st.success("✅ ¡Datos guardados en GitHub con éxito!")
                 else:
-                    st.error("⚠️ Error al guardar en GitHub. Revisa el token en los Secrets.")
+                    st.error("⚠️ Error al guardar en GitHub. Comprueba el token y el nombre del repo en los Secrets.")
             except Exception as e:
                 st.error(f"Error: {e}")
                 
@@ -693,7 +670,7 @@ with tab3:
         {
             "Fecha": idx, 
             "Adjuntos de Guardia": ", ".join([p for p in SURGEONS if str(row[p]).strip().upper().startswith("G")]), 
-            "Residentes de Guardia": ", ".join([p for p in RESIDENTRES if str(row[p]).strip().upper().startswith("G")]) if 'RESIDENTRES' in globals() else ", ".join([p for p in RESIDENTS if str(row[p]).strip().upper().startswith("G")])
+            "Residentes de Guardia": ", ".join([p for p in RESIDENTS if str(row[p]).strip().upper().startswith("G")])
         } 
         for idx, row in st.session_state.matrix_df.iterrows()
     ]
@@ -715,7 +692,6 @@ with tab3:
                 if parte.startswith("G"): conteo["G"] += 1
                 elif parte in conteo: conteo[parte] += 1
         
-        # Solución limpia sin query para evitar errores de sintaxis o acentos
         resumen_prof_df = pd.DataFrame(list(conteo.items()), columns=["Actividad", "Total Días / Turnos en el Mes"])
         resumen_prof_df = resumen_prof_df[resumen_prof_df["Total Días / Turnos en el Mes"] > 0]
         
