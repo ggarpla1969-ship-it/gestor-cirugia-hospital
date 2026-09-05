@@ -127,13 +127,11 @@ def apply_guardia_rules(df):
     return df
 
 def validar_incompatibilidades(fecha, equipo):
-    """Comprueba si algún miembro del equipo tiene consulta u otra actividad incompatible (SG, etc.) en esa fecha."""
-        incompatibles = ["C. HOS M.", "C. HOS T.", "C.VEC.", "C.TELD.", "C.PRUD. 1", "C.PRUD. 2", "SG", "VAC", "BAJA"]
+    incompatibles = ["C. HOS M.", "C. HOS T.", "C.VEC.", "C.TELD.", "C.PRUD. 1", "C.PRUD. 2", "SG", "VAC", "BAJA"]
     conflictos = []
     
     for p in equipo:
         estado_actual = str(st.session_state.matrix_df.at[fecha, p]).strip().upper()
-        # Verificar si contiene alguna de las cadenas incompatibles
         for inc in incompatibles:
             if inc in estado_actual:
                 conflictos.append(f"• **{p}** tiene asignado actualmente: *{estado_actual}*")
@@ -481,7 +479,6 @@ with tab1:
         if not equipo_nombres:
             st.warning("Selecciona al menos un miembro.")
         else:
-            # Validar incompatibilidades con consultas o salida de guardia (SG)
             conflictos = validar_incompatibilidades(q_date, equipo_nombres)
             if conflictos:
                 st.error("🚫 **Error de Incompatibilidad:** No se puede asignar el quirófano porque el personal seleccionado tiene actividades concurrentes en esa fecha:")
@@ -551,7 +548,6 @@ with tab1:
                         new_res = st.multiselect("Nuevos Residentes", RESIDENTS, default=eq_actual_res, key="mod_res")
                         
                         if st.button("Guardar Cambios de Equipo"):
-                            # Validar incompatibilidades en la modificación
                             nuevo_equipo = new_adj + new_res
                             conflictos = validar_incompatibilidades(row_sel['Fecha'], nuevo_equipo)
                             if conflictos:
