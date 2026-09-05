@@ -3,8 +3,6 @@ import pandas as pd
 import datetime
 import calendar
 import re
-import base64
-import requests
 import git
 import os
 
@@ -83,44 +81,20 @@ ALL_STATUSES = STATUSES + COMBO_Q + COMBO_G + COMBO_G_Q + ["Q + Q", "G + Q", "G 
 DIAS_SEMANA = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
 # ==========================================
-# 2. FUNCIONES DE LÓGICA Y GITHUB SYNC
+# 2. FUNCIONES DE LÓGICA Y GITPYTHON SYNC
 # ==========================================
-def leer_archivo_github(filepath):
+def sincronizar_con_git_local():
     try:
-        gh_config = st.secrets["github"]
-        token = gh_config["token"]
-        repo = gh_config["repo"]
-        url = f"https://api.github.com/repos/{repo}/contents/{filepath}"
-        headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            file_content = response.json()
-            decoded = base64.b64decode(file_content["content"]).decode("utf-8")
-            return decoded, file_content["sha"]
-    except Exception as e:
-        pass
-    return None, None
+        os.system('git config --global user.email "gestor-hospital@streamlit.app"')
+        os.system('git config --global user.name "Gestor Cirugia Bot"')
 
-def guardar_archivo_github(filepath, content_str, commit_message):
-    try:
-        gh_config = st.secrets["github"]
-        token = gh_config["token"]
-        repo = gh_config["repo"]
-        url = f"https://api.github.com/repos/{repo}/contents/{filepath}"
-        headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+        repo = git.Repo(".")
+        repo.index.add(["matriz_actual.csv", "quirofanos_actual.csv"])
+        repo.index.commit("Actualización automática desde Streamlit Cloud")
         
-        _, sha = leer_archivo_github(filepath)
-        
-        encoded_content = base64.b64encode(content_str.encode("utf-8")).decode("utf-8")
-        payload = {
-            "message": commit_message,
-            "content": encoded_content
-        }
-        if sha:
-            payload["sha"] = sha
-            
-        response = requests.put(url, headers=headers, json=payload)
-        return response.status_code in [200, 201]
+        origin = repo.remote(name="origin")
+        origin.push("main")
+        return True
     except Exception as e:
         return False
 
@@ -345,26 +319,19 @@ def limpiar_estado_q(fecha, docs):
                 st.session_state.matrix_df.at[fecha, doc] = est[:-4]
 
 # ==========================================
-# 3. CARGA DE DATOS DESDE GITHUB (RAÍZ)
+# 3. CARGA DE DATOS LOCALES
 # ==========================================
-def cargar_datos_nube():
-    try:
-        csv_m, _ = leer_archivo_github("matriz_actual.csv")
-        csv_q, _ = leer_archivo_github("quirofanos_actual.csv")
-        
-        df_m = pd.read_csv(pd.io.common.StringIO(csv_m), index_col=0) if csv_m else None
-        df_q = pd.read_csv(pd.io.common.StringIO(csv_q)) if csv_q else None
-        return df_m, df_q
-    except Exception:
-        return None, None
-
 now = datetime.datetime.now()
 
 if 'matrix_df' not in st.session_state:
     st.session_state.current_year = now.year
     st.session_state.current_month = now.month
     
-    df_m, df_q = cargar_datos_nube()
+    try:
+        df_m = pd.read_csv("matriz_actual.csv", index_col=0)
+        df_q = pd.read_csv("quirofanos_actual.csv")
+    except Exception:
+        df_m, df_q = None, None
     
     if df_m is not None and not df_m.empty:
         st.session_state.matrix_df = df_m
@@ -407,62 +374,35 @@ with st.sidebar:
             
         st.divider()
         
-        # --- SECCIÓN DE SINCRONIZACIÓN EN GITHUB ---
+        # --- SECCIÓN DE SINCRONIZACIÓN AUTOMÁTICA ---
         st.subheader("☁️ Sincronizar en la Nube")
-        st.caption("Guarda los datos de forma segura en tu repositorio de GitHub.")
+        st.caption("Guarda los cambios directamente en el repositorio.")
         
         if st.button("🚀 Guardar Todo en la Nube", type="primary", use_container_width=True):
             try:
-                with st.spinner("Guardando en GitHub..."):
-                    csv_m = st.session_state.matrix_df.to_csv()
-                    csv_q = st.session_state.quirofanos_df.to_csv(index=False)
+                with st.spinner("Guardando y sincronizando..."):
+                    st.session_state.matrix_df.to_csv("matriz_actual.csv")
+                    st.session_state.quirofanos_df.to_csv("quirofanos_actual.csv", index=False)
                     
-                    ok_m = guardar_archivo_github("matriz_actual.csv", csv_m, "Actualización matriz desde app")
-                    ok_q = guardar_archivo_github("quirofanos_actual.csv", csv_q, "Actualización quirófanos desde app")
+                    ok = sincronizar_con_git_local()
                     
-                if ok_m and ok_q:
-                    st.success("✅ ¡Datos guardados en GitHub con éxito!")
+                if ok:
+                    st.success("✅ ¡Datos guardados y sincronizados con éxito!")
                 else:
-                    st.error("⚠️ Error al guardar en GitHub. Comprueba el token y el nombre del repo en los Secrets.")
+                    st.error("⚠️ Error al sincronizar con Git.")
             except Exception as e:
                 st.error(f"Error: {e}")
                 
-        if st.button("🔄 Refrescar desde la Nube", use_container_width=True):
-            df_m, df_q = cargar_datos_nube()
-            if df_m is not None:
-                st.session_state.matrix_df = df_m
-                if df_q is not None:
-                    st.session_state.quirofanos_df = df_q
+        if st.button("🔄 Refrescar datos", use_container_width=True):
+            try:
+                st.session_state.matrix_df = pd.read_csv("matriz_actual.csv", index_col=0)
+                st.session_state.quirofanos_df = pd.read_csv("quirofanos_actual.csv")
                 st.session_state.update_counter += 1
-                st.success("✅ Datos recargados desde GitHub.")
+                st.success("✅ Datos recargados.")
                 st.rerun()
-            else:
-                st.warning("No se encontraron archivos en GitHub todavía.")
+            except Exception as e:
+                st.warning("No se pudieron recargar los archivos.")
 
-        st.divider()
-        st.subheader("📂 Restaurar Local")
-        uploaded_csv_matriz = st.file_uploader("Matriz Local (CSV)", type=["csv"], key="up_csv_mat")
-        if uploaded_csv_matriz is not None and st.button("Restaurar Matriz", type="primary"):
-            try:
-                df_cargado = pd.read_csv(uploaded_csv_matriz, index_col=0).fillna("") 
-                st.session_state.matrix_df = df_cargado
-                st.session_state.update_counter += 1
-                st.success("✅ Matriz restaurada.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error: {e}")
-                
-        uploaded_csv_quiro = st.file_uploader("Quirófanos Local (CSV)", type=["csv"], key="up_csv_qui")
-        if uploaded_csv_quiro is not None and st.button("Restaurar Quirófanos", type="primary"):
-            try:
-                df_q_cargado = pd.read_csv(uploaded_csv_quiro)
-                st.session_state.quirofanos_df = df_q_cargado
-                st.session_state.update_counter += 1
-                st.success("✅ Quirófanos restaurados.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error: {e}")
-        
         st.divider()
         st.subheader("📥 Importar Excel")
 
