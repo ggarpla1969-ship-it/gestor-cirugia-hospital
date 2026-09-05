@@ -80,7 +80,7 @@ ALL_STATUSES = STATUSES + COMBO_Q + COMBO_G + COMBO_G_Q + ["Q + Q", "G + Q", "G 
 DIAS_SEMANA = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
 # ==========================================
-# 2. FUNCIONES DE LÓGICA Y PERSISTENCIA
+# 2. FUNCIONES DE LÓGICA Y VALIDACIÓN
 # ==========================================
 def sincronizar_con_git_local():
     try:
@@ -125,6 +125,20 @@ def apply_guardia_rules(df):
             if current_status == "G" or current_status.startswith("G +"):
                 df.iat[i+1, df.columns.get_loc(col)] = "SG"
     return df
+
+def validar_incompatibilidades(fecha, equipo):
+    """Comprueba si algún miembro del equipo tiene consulta u otra actividad incompatible (SG, etc.) en esa fecha."""
+        incompatibles = ["C. HOS M.", "C. HOS T.", "C.VEC.", "C.TELD.", "C.PRUD. 1", "C.PRUD. 2", "SG", "VAC", "BAJA"]
+    conflictos = []
+    
+    for p in equipo:
+        estado_actual = str(st.session_state.matrix_df.at[fecha, p]).strip().upper()
+        # Verificar si contiene alguna de las cadenas incompatibles
+        for inc in incompatibles:
+            if inc in estado_actual:
+                conflictos.append(f"• **{p}** tiene asignado actualmente: *{estado_actual}*")
+                break
+    return conflictos
 
 def style_matrix(df):
     styles = pd.DataFrame('', index=df.index, columns=df.columns)
@@ -467,27 +481,35 @@ with tab1:
         if not equipo_nombres:
             st.warning("Selecciona al menos un miembro.")
         else:
-            equipo_str = ", ".join(equipo_nombres)
-            nueva_asignacion = pd.DataFrame([{
-                "Fecha": q_date, 
-                "Unidad": q_unidad, 
-                "Grupo": q_grupo, 
-                "Quirófano": q_sala, 
-                "Turno": q_turno, 
-                "HC": q_hc, 
-                "Equipo": equipo_str
-            }])
-            st.session_state.quirofanos_df = pd.concat([st.session_state.quirofanos_df, nueva_asignacion], ignore_index=True)
-            for p in equipo_nombres:
-                est = str(st.session_state.matrix_df.at[q_date, p]).strip()
-                if est in ["Libre", "none", ""]: 
-                    st.session_state.matrix_df.at[q_date, p] = "Q"
-                elif est == "Q": 
-                    st.session_state.matrix_df.at[q_date, p] = "Q + Q"
-                elif "Q" not in est: 
-                    st.session_state.matrix_df.at[q_date, p] = f"{est} + Q"
-            st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
-            st.rerun()
+            # Validar incompatibilidades con consultas o salida de guardia (SG)
+            conflictos = validar_incompatibilidades(q_date, equipo_nombres)
+            if conflictos:
+                st.error("🚫 **Error de Incompatibilidad:** No se puede asignar el quirófano porque el personal seleccionado tiene actividades concurrentes en esa fecha:")
+                for c in conflictos:
+                    st.markdown(c)
+            else:
+                equipo_str = ", ".join(equipo_nombres)
+                nueva_asignacion = pd.DataFrame([{
+                    "Fecha": q_date, 
+                    "Unidad": q_unidad, 
+                    "Grupo": q_grupo, 
+                    "Quirófano": q_sala, 
+                    "Turno": q_turno, 
+                    "HC": q_hc, 
+                    "Equipo": equipo_str
+                }])
+                st.session_state.quirofanos_df = pd.concat([st.session_state.quirofanos_df, nueva_asignacion], ignore_index=True)
+                for p in equipo_nombres:
+                    est = str(st.session_state.matrix_df.at[q_date, p]).strip()
+                    if est in ["Libre", "none", ""]: 
+                        st.session_state.matrix_df.at[q_date, p] = "Q"
+                    elif est == "Q": 
+                        st.session_state.matrix_df.at[q_date, p] = "Q + Q"
+                    elif "Q" not in est: 
+                        st.session_state.matrix_df.at[q_date, p] = f"{est} + Q"
+                st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
+                st.success("✅ Quirófano asignado correctamente.")
+                st.rerun()
 
     st.subheader("Registro de Quirófanos")
     st.dataframe(st.session_state.quirofanos_df, use_container_width=True, hide_index=True)
@@ -529,23 +551,30 @@ with tab1:
                         new_res = st.multiselect("Nuevos Residentes", RESIDENTS, default=eq_actual_res, key="mod_res")
                         
                         if st.button("Guardar Cambios de Equipo"):
-                            equipo_antiguo = [x.strip() for x in str(row_sel['Equipo']).split(",") if x.strip()]
-                            fecha_antigua = row_sel['Fecha']
-                            limpiar_estado_q(fecha_antigua, equipo_antiguo)
+                            # Validar incompatibilidades en la modificación
                             nuevo_equipo = new_adj + new_res
-                            st.session_state.quirofanos_df.at[idx_sel, 'HC'] = new_hc
-                            st.session_state.quirofanos_df.at[idx_sel, 'Equipo'] = ", ".join(nuevo_equipo)
-                            for p in nuevo_equipo:
-                                est = str(st.session_state.matrix_df.at[fecha_antigua, p]).strip()
-                                if est in ["Libre", "none", ""]: 
-                                    st.session_state.matrix_df.at[fecha_antigua, p] = "Q"
-                                elif est == "Q": 
-                                    st.session_state.matrix_df.at[fecha_antigua, p] = "Q + Q"
-                                elif "Q" not in est: 
-                                    st.session_state.matrix_df.at[fecha_antigua, p] = f"{est} + Q"
-                            st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
-                            st.success("Quirófano actualizado.")
-                            st.rerun()
+                            conflictos = validar_incompatibilidades(row_sel['Fecha'], nuevo_equipo)
+                            if conflictos:
+                                st.error("🚫 **Error de Incompatibilidad:** No se pueden aplicar los cambios porque algún miembro tiene actividades concurrentes:")
+                                for c in conflictos:
+                                    st.markdown(c)
+                            else:
+                                equipo_antiguo = [x.strip() for x in str(row_sel['Equipo']).split(",") if x.strip()]
+                                fecha_antigua = row_sel['Fecha']
+                                limpiar_estado_q(fecha_antigua, equipo_antiguo)
+                                st.session_state.quirofanos_df.at[idx_sel, 'HC'] = new_hc
+                                st.session_state.quirofanos_df.at[idx_sel, 'Equipo'] = ", ".join(nuevo_equipo)
+                                for p in nuevo_equipo:
+                                    est = str(st.session_state.matrix_df.at[fecha_antigua, p]).strip()
+                                    if est in ["Libre", "none", ""]: 
+                                        st.session_state.matrix_df.at[fecha_antigua, p] = "Q"
+                                    elif est == "Q": 
+                                        st.session_state.matrix_df.at[fecha_antigua, p] = "Q + Q"
+                                    elif "Q" not in est: 
+                                        st.session_state.matrix_df.at[fecha_antigua, p] = f"{est} + Q"
+                                st.session_state.matrix_df = apply_guardia_rules(st.session_state.matrix_df)
+                                st.success("Quirófano actualizado.")
+                                st.rerun()
 
 with tab2:
     st.header("Matriz de Personal")
