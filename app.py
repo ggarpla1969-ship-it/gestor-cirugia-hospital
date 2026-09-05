@@ -92,7 +92,11 @@ def sincronizar_con_git_local():
         repo.index.add(["matriz_actual.csv", "quirofanos_actual.csv"])
         repo.index.commit("Actualización automática desde Streamlit Cloud")
         
+        token = "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"
+        repo_url = f"https://{token}@github.com/ggarpla1969-ship-it/gestor-cirugia-local-hospital.git"
+        
         origin = repo.remote(name="origin")
+        origin.set_url(repo_url)
         origin.push("main")
         return True
     except Exception as e:
