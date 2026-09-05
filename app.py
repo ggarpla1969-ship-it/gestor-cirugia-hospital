@@ -5,6 +5,8 @@ import calendar
 import re
 import base64
 import requests
+import git
+import os
 
 # ==========================================
 # 0. CONFIGURACIÓN Y CONTROL DE ACCESO
@@ -123,10 +125,32 @@ def guardar_archivo_github(filepath, content_str, commit_message):
     except Exception as e:
         return False
 
+def sincronizar_con_github_gitpython(ruta_csv="datos_cirugia.csv"):
+    try:
+        os.system('git config --global user.email "gestor-hospital@streamlit.app"')
+        os.system('git config --global user.name "Gestor Cirugia Bot"')
+
+        repo_path = "."
+        repo = git.Repo(repo_path)
+        
+        repo.index.add([ruta_csv])
+        repo.index.commit("Actualización automática de datos desde Streamlit")
+        
+        token = st.secrets["github"]["token"]
+        repo_url = f"https://{token}@github.com/ggarpla1969-ship-it/gestor-cirugia-local-hospital.git"
+        
+        origin = repo.remote(name='origin')
+        origin.set_url(repo_url)
+        origin.push('main')
+        
+        return True
+    except Exception as e:
+        return False
+
 def generar_matriz_base(year, month):
     num_days = calendar.monthrange(year, month)[1]
     dates = [datetime.date(year, month, day) for day in range(1, num_days + 1)]
-    df = pd.DataFrame(index=[f"{d.strftime('%d/%m/%Y')} ({DIAS_SEMANA[d.weekday()]})" for d in dates], columns=ALL_STAFF)
+    df = pd.DataFrame(index=[f"{d.strftime('%d/%m/%Y')} ({DIAS_SEMANA[d.weekday()])}" for d in dates], columns=ALL_STAFF)
     
     for i, date_obj in enumerate(dates):
         weekday = date_obj.weekday()
