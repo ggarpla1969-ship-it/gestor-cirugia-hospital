@@ -3,7 +3,6 @@ import pandas as pd
 import datetime
 import calendar
 import re
-import git
 import os
 
 # ==========================================
@@ -81,23 +80,10 @@ ALL_STATUSES = STATUSES + COMBO_Q + COMBO_G + COMBO_G_Q + ["Q + Q", "G + Q", "G 
 DIAS_SEMANA = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
 # ==========================================
-# 2. FUNCIONES DE LÓGICA Y GITPYTHON SYNC
+# 2. FUNCIONES DE LÓGICA Y PERSISTENCIA
 # ==========================================
 def sincronizar_con_git_local():
     try:
-        os.system('git config --global user.email "gestor-hospital@streamlit.app"')
-        os.system('git config --global user.name "Gestor Cirugia Bot"')
-
-        repo = git.Repo(".")
-        repo.index.add(["matriz_actual.csv", "quirofanos_actual.csv"])
-        repo.index.commit("Actualización automática desde Streamlit Cloud")
-        
-        token = "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"
-        repo_url = f"https://{token}@github.com/ggarpla1969-ship-it/gestor-cirugia-local-hospital.git"
-        
-        origin = repo.remote(name="origin")
-        origin.set_url(repo_url)
-        origin.push("main")
         return True
     except Exception as e:
         return False
@@ -378,22 +364,21 @@ with st.sidebar:
             
         st.divider()
         
-        # --- SECCIÓN DE SINCRONIZACIÓN AUTOMÁTICA ---
+        # --- SECCIÓN DE PERSISTENCIA ---
         st.subheader("☁️ Sincronizar en la Nube")
-        st.caption("Guarda los cambios directamente en el repositorio.")
+        st.caption("Guarda los cambios localmente en la app.")
         
         if st.button("🚀 Guardar Todo en la Nube", type="primary", use_container_width=True):
             try:
-                with st.spinner("Guardando y sincronizando..."):
+                with st.spinner("Guardando..."):
                     st.session_state.matrix_df.to_csv("matriz_actual.csv")
                     st.session_state.quirofanos_df.to_csv("quirofanos_actual.csv", index=False)
-                    
                     ok = sincronizar_con_git_local()
                     
                 if ok:
-                    st.success("✅ ¡Datos guardados y sincronizados con éxito!")
+                    st.success("✅ ¡Datos guardados con éxito!")
                 else:
-                    st.error("⚠️ Error al sincronizar con Git.")
+                    st.error("⚠️ Error al guardar.")
             except Exception as e:
                 st.error(f"Error: {e}")
                 
